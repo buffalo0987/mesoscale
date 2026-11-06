@@ -1,0 +1,29 @@
+# Local toolchains & virtual environments
+.venv/
+.tools/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+catboost_info/
+
+# Runtime data (keep clean for first-boot onboarding)
+data/
+*.db
+*.db-shm
+*.db-wal
+*.duckdb
+*.duckdb.wal
+
+# Frontend build & dependencies
+frontend/node_modules/
+frontend/dist/
+frontend/dev-dist/
+*.tsbuildinfo
+backend/mesoscale/static_dist/
+
+# OS & editor files
+.DS_Store
+.env
+.env.local

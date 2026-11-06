@@ -1,0 +1,58 @@
+[project]
+name = "mesoscale"
+version = "0.1.0"
+description = "Mesoscale — Adaptive self-learning hyper-local weather PWA & meteorological post-processing engine"
+readme = "DEPLOY_TAILSCALE.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+    "httpx>=0.27.2",
+    "apscheduler>=3.10.4",
+    "pydantic>=2.9.0",
+    "pydantic-settings>=2.6.0",
+    "duckdb>=1.1.0",
+    "polars>=1.12.0",
+    "pyarrow>=18.0.0",
+    "aiosqlite>=0.20.0",
+    "catboost>=1.2.7",
+    "lightgbm>=4.5.0",
+    "scikit-learn>=1.5.2",
+    "scipy>=1.14.1",
+    "numpy>=1.26.4,<2.2.0",
+    "pywebpush>=2.0.1",
+    "py-vapid>=1.9.1",
+    "cryptography>=43.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3.3",
+    "pytest-asyncio>=0.24.0",
+    "respx>=0.21.1",
+    "ruff>=0.7.0",
+]
+
+[project.scripts]
+mesoscale-server = "mesoscale.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["backend/mesoscale"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+pythonpath = ["backend"]
+
+[tool.ruff]
+line-length = 105
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]

@@ -1,0 +1,13 @@
+services:
+  mesoscale:
+    build: .
+    container_name: mesoscale
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./data:/data
+    environment:
+      - MESOSCALE_DATA_DIR=/data
+      - MESOSCALE_NWS_USER_AGENT=(MesoscaleWeatherPWA, selfhosted@local.tailnet)
+      - MESOSCALE_VAPID_SUBJECT=mailto:weather@local.tailnet
