@@ -22,6 +22,8 @@ echo "      Adaptive Hyper-Local Weather Engine      "
 echo -e "${RESET}"
 
 # 1. Privilege Check
+export DEBIAN_FRONTEND=noninteractive
+
 if [ "$(id -u)" -ne 0 ]; then
     if command -v sudo >/dev/null 2>&1; then
         SUDO="sudo"
@@ -57,7 +59,7 @@ cd "$INSTALL_DIR"
 # 2. System Prerequisites
 echo -e "${CYAN}[1/6] Installing system packages (curl, git, libgomp1, ca-certificates)...${RESET}"
 $SUDO apt-get update -qq
-$SUDO DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
+$SUDO apt-get install -y -qq \
     curl \
     git \
     ca-certificates \
@@ -78,9 +80,13 @@ else
 fi
 
 if [ "$NODE_NEEDS_INSTALL" = true ]; then
-    echo -e "      Installing Node.js 22 LTS via NodeSource..."
-    curl -fsSL https://deb.nodesource.com/setup_22.x | $SUDO bash - >/dev/null 2>&1
-    $SUDO DEBIAN_FRONTEND=noninteractive apt-get install -y -qq nodejs >/dev/null
+    echo -e "      Installing Node.js 22 LTS..."
+    if ! curl -fsSL https://deb.nodesource.com/setup_22.x | $SUDO bash - >/dev/null 2>&1; then
+        echo -e "      NodeSource setup skipped or failed, installing via apt packages..."
+        $SUDO apt-get install -y -qq nodejs npm >/dev/null 2>&1 || true
+    else
+        $SUDO apt-get install -y -qq nodejs >/dev/null
+    fi
 fi
 echo -e "${GREEN}      Node $(node -v) & npm $(npm -v) ready.${RESET}"
 

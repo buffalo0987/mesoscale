@@ -14,6 +14,8 @@ RESET="\033[0m"
 echo -e "${CYAN}${BOLD}[*] Updating Mesoscale...${RESET}"
 
 # Privilege Check
+export DEBIAN_FRONTEND=noninteractive
+
 if [ "$(id -u)" -ne 0 ]; then
     if command -v sudo >/dev/null 2>&1; then
         SUDO="sudo"
