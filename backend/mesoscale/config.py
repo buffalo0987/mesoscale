@@ -17,8 +17,8 @@ class Settings(BaseSettings):
     )
 
     data_dir: Path = Path("./data")
-    nws_user_agent: str = "(MesoscaleWeatherPWA, selfhosted@local.tailnet)"
-    vapid_subject: str = "mailto:weather@local.tailnet"
+    nws_user_agent: str = "(MesoscaleWeatherPWA, alerts@mesoscale.org)"
+    vapid_subject: str = "mailto:alerts@mesoscale.org"
 
     ring_radius_km: float = 8.0
     backfill_days: int = 365

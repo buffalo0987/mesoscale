@@ -2,11 +2,13 @@ import React, { useState } from 'react';
 import {
   Bell,
   BellOff,
+  Check,
   Cpu,
   Home,
   Loader2,
   MapPin,
   Navigation,
+  Pencil,
   Plus,
   Radar,
   Search,
@@ -26,7 +28,7 @@ interface LocationBarProps {
   onSelectEphemeral: (lat: number, lon: number, name?: string) => void;
   onPinnedNew: (loc: PinnedLocation) => void;
   onDeletePinned: (id: number) => void;
-  onLocationUpdated: () => void;
+  onLocationUpdated: (loc: PinnedLocation) => void;
   onToggleUnits: () => void;
   onOpenSettings: () => void;
 }
@@ -49,6 +51,24 @@ export const LocationBar: React.FC<LocationBarProps> = ({
   const [nickname, setNickname] = useState('');
   const [results, setResults] = useState<GeoSearchItem[]>([]);
   const [busy, setBusy] = useState(false);
+  const [renamingLoc, setRenamingLoc] = useState<PinnedLocation | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [savingRename, setSavingRename] = useState(false);
+
+  const handleSaveRename = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!renamingLoc) return;
+    const trimmed = renameValue.trim();
+    if (!trimmed) return;
+    setSavingRename(true);
+    try {
+      const res = await api.updateLocation(renamingLoc.id, { name: trimmed });
+      onLocationUpdated(res.location);
+      setRenamingLoc(null);
+    } finally {
+      setSavingRename(false);
+    }
+  };
 
   const runSearch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -104,7 +124,21 @@ export const LocationBar: React.FC<LocationBarProps> = ({
                     </span>
                   ) : null}
                   {isActive && pinnedLocations.length > 0 && (
-                    <>
+                    <div className="flex items-center gap-0.5 ml-0.5 pl-1 border-l border-cyan-400/25">
+                      <button
+                        type="button"
+                        title="Edit location nickname"
+                        aria-label="Edit location nickname"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSearchOpen(false);
+                          setRenamingLoc(loc);
+                          setRenameValue(loc.name);
+                        }}
+                        className="p-1 rounded-md opacity-75 hover:opacity-100 hover:bg-slate-800/80 hover:text-cyan-300 transition cursor-pointer"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
                       <button
                         type="button"
                         title={
@@ -112,33 +146,42 @@ export const LocationBar: React.FC<LocationBarProps> = ({
                             ? 'Push & Hail alerts active for this location (tap to mute)'
                             : 'Push & Hail alerts muted for this location (tap to enable)'
                         }
+                        aria-label={
+                          loc.alerts_enabled !== false
+                            ? 'Mute alerts for this location'
+                            : 'Enable alerts for this location'
+                        }
                         onClick={async (e) => {
                           e.stopPropagation();
-                          await api.updateLocation(loc.id, {
+                          const res = await api.updateLocation(loc.id, {
                             alerts_enabled: loc.alerts_enabled === false,
                           });
-                          onLocationUpdated();
+                          onLocationUpdated(res.location);
                         }}
-                        className="opacity-70 hover:opacity-100 ml-0.5 cursor-pointer"
+                        className="p-1 rounded-md opacity-80 hover:opacity-100 hover:bg-slate-800/80 transition cursor-pointer"
                       >
                         {loc.alerts_enabled !== false ? (
-                          <Bell className="w-3 h-3 text-cyan-300" />
+                          <Bell className="w-3.5 h-3.5 text-cyan-300" />
                         ) : (
-                          <BellOff className="w-3 h-3 text-slate-500" />
+                          <BellOff className="w-3.5 h-3.5 text-slate-500" />
                         )}
                       </button>
                       <button
                         type="button"
                         title="Remove pinned location"
+                        aria-label="Remove pinned location"
                         onClick={(e) => {
                           e.stopPropagation();
+                          if (renamingLoc?.id === loc.id) {
+                            setRenamingLoc(null);
+                          }
                           onDeletePinned(loc.id);
                         }}
-                        className="opacity-60 hover:opacity-100 hover:text-rose-400 ml-0.5 cursor-pointer"
+                        className="p-1 rounded-md opacity-70 hover:opacity-100 hover:bg-slate-800/80 hover:text-rose-400 transition cursor-pointer"
                       >
-                        <Trash2 className="w-3 h-3" />
+                        <Trash2 className="w-3.5 h-3.5" />
                       </button>
-                    </>
+                    </div>
                   )}
                 </div>
               );
@@ -154,7 +197,10 @@ export const LocationBar: React.FC<LocationBarProps> = ({
 
             <button
               type="button"
-              onClick={() => setSearchOpen((v) => !v)}
+              onClick={() => {
+                setRenamingLoc(null);
+                setSearchOpen((v) => !v);
+              }}
               className="p-1.5 px-2 sm:px-2.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 text-xs flex items-center gap-1 shrink-0 cursor-pointer"
               title="Search or add location"
             >
@@ -190,6 +236,67 @@ export const LocationBar: React.FC<LocationBarProps> = ({
           </button>
         </div>
       </div>
+
+      {renamingLoc && (
+        <div className="border-t border-slate-800 bg-slate-950/95 px-3 sm:px-4 py-3">
+          <form onSubmit={handleSaveRename} className="max-w-xl mx-auto space-y-1.5">
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1 min-w-0">
+                <Home className="w-4 h-4 text-cyan-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={renameValue}
+                  onChange={(e) => setRenameValue(e.target.value)}
+                  maxLength={120}
+                  autoFocus
+                  placeholder='Nickname (e.g., "Home", "Parents", "Aruba")'
+                  className="w-full pl-9 pr-3 py-2 rounded-xl bg-slate-900 border border-cyan-400/50 text-base sm:text-sm text-white focus:outline-none focus:border-cyan-300"
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={savingRename || !renameValue.trim()}
+                className="px-3.5 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 disabled:opacity-50 text-slate-950 font-semibold text-xs flex items-center gap-1 cursor-pointer shrink-0"
+              >
+                {savingRename ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Check className="w-3.5 h-3.5" />
+                )}
+                Save
+              </button>
+              <button
+                type="button"
+                onClick={() => setRenamingLoc(null)}
+                className="p-2 text-slate-400 hover:text-white cursor-pointer shrink-0"
+                title="Cancel"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            {renamingLoc.address_label && renamingLoc.address_label.trim() && (
+              <div className="flex flex-wrap items-center justify-between gap-2 px-1 text-[11px] text-slate-400">
+                <span className="truncate">
+                  Address: <span className="text-slate-300">{renamingLoc.address_label}</span>
+                </span>
+                {(() => {
+                  const streetOrCity = renamingLoc.address_label.split(',')[0].trim();
+                  if (!streetOrCity || streetOrCity === renameValue.trim()) return null;
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => setRenameValue(streetOrCity)}
+                      className="text-cyan-300 hover:text-cyan-200 underline underline-offset-2 cursor-pointer shrink-0"
+                    >
+                      Use "{streetOrCity}"
+                    </button>
+                  );
+                })()}
+              </div>
+            )}
+          </form>
+        </div>
+      )}
 
       {searchOpen && (
         <div className="border-t border-slate-800 bg-slate-950/95 px-3 sm:px-4 py-3.5 sm:py-4">

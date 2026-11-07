@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Bell, Car, CheckCircle2, Loader2, Radio, ShieldAlert, X } from 'lucide-react';
+import { AlertTriangle, Bell, Car, CheckCircle2, Loader2, Radio, ShieldAlert, X } from 'lucide-react';
 import { api } from '../api';
 import type { NotificationPrefs, PwsConfig } from '../types';
 import { urlBase64ToUint8Array } from '../units';
@@ -7,15 +7,26 @@ import { urlBase64ToUint8Array } from '../units';
 interface SettingsDrawerProps {
   open: boolean;
   vapidPublicKey: string;
+  subscriberCount?: number;
   initialNotifPrefs: NotificationPrefs;
   initialPwsConfig: PwsConfig;
   onClose: () => void;
   onUpdated: () => void;
 }
 
+function sameBytes(a: ArrayBuffer | null | undefined, b: Uint8Array): boolean {
+  if (!a || a.byteLength !== b.byteLength) return false;
+  const va = new Uint8Array(a);
+  for (let i = 0; i < b.length; i++) {
+    if (va[i] !== b[i]) return false;
+  }
+  return true;
+}
+
 export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
   open,
   vapidPublicKey,
+  subscriberCount = 0,
   initialNotifPrefs,
   initialPwsConfig,
   onClose,
@@ -33,7 +44,12 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
     api_key: '',
     application_key: '',
   });
-  const [pushStatus, setPushStatus] = useState<string | null>(null);
+  const [pushStatus, setPushStatus] = useState<{
+    text: string;
+    tone: 'ok' | 'warn' | 'err';
+  } | null>(null);
+  const [subscribing, setSubscribing] = useState(false);
+  const [testingPush, setTestingPush] = useState(false);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -50,39 +66,98 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
 
   const handleEnableBrowserPush = async () => {
     setPushStatus(null);
+    setSubscribing(true);
     try {
       if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
-        setPushStatus('Web Push requires HTTPS (e.g., Tailscale Serve) and an installed/modern browser.');
+        setPushStatus({
+          text: 'Web Push requires HTTPS (e.g., Tailscale Serve) and an installed/modern browser (on iOS, use "Add to Home Screen").',
+          tone: 'warn',
+        });
         return;
       }
       const perm = await Notification.requestPermission();
       if (perm !== 'granted') {
-        setPushStatus('Notification permission was not granted.');
+        setPushStatus({ text: 'Notification permission was not granted.', tone: 'warn' });
         return;
       }
       const reg = await navigator.serviceWorker.ready;
       const appKey = urlBase64ToUint8Array(vapidPublicKey);
-      const sub = await reg.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: appKey as unknown as BufferSource,
+      const existing = await reg.pushManager.getSubscription();
+      if (existing && !sameBytes(existing.options?.applicationServerKey, appKey)) {
+        await existing.unsubscribe().catch(() => {});
+      }
+
+      let sub: PushSubscription;
+      try {
+        sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: appKey as unknown as BufferSource,
+        });
+      } catch {
+        const cur = await reg.pushManager.getSubscription();
+        if (cur) await cur.unsubscribe().catch(() => {});
+        sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: appKey as unknown as BufferSource,
+        });
+      }
+
+      const saved = await api.subscribePush(sub.toJSON());
+      onUpdated();
+      const countTxt =
+        saved.subscriber_count !== undefined ? ` (${saved.subscriber_count} device(s) active)` : '';
+      setPushStatus({
+        text: `This device is subscribed to Native VAPID Web Push!${countTxt}`,
+        tone: 'ok',
       });
-      await api.subscribePush(sub.toJSON());
-      setPushStatus('This device is now subscribed to Native VAPID Web Push!');
     } catch (err) {
-      setPushStatus(err instanceof Error ? err.message : 'Push subscription failed');
+      setPushStatus({
+        text: err instanceof Error ? err.message : 'Push subscription failed',
+        tone: 'err',
+      });
+    } finally {
+      setSubscribing(false);
     }
   };
 
   const handleTestPush = async () => {
+    setTestingPush(true);
     try {
       const res = await api.sendTestPush();
-      setPushStatus(
-        res.sent > 0
-          ? `Test notification dispatched to ${res.sent} subscribed device(s).`
-          : 'No active push subscriptions yet — tap "Subscribe This Device" first.'
-      );
+      onUpdated();
+      if (res.sent > 0) {
+        setPushStatus({
+          text: `Test notification dispatched to ${res.sent} subscribed device(s).`,
+          tone: 'ok',
+        });
+      } else if (res.suppressed === 'no_subscribers' || res.subscriber_count === 0) {
+        setPushStatus({
+          text: 'No active push subscriptions yet — tap "Subscribe This Device" first.',
+          tone: 'warn',
+        });
+      } else if (res.suppressed === 'disabled') {
+        setPushStatus({
+          text: 'Push notifications are currently disabled in settings.',
+          tone: 'warn',
+        });
+      } else if (res.errors && res.errors.length > 0) {
+        setPushStatus({
+          text: `Push delivery error: ${res.errors[0]}`,
+          tone: 'err',
+        });
+      } else {
+        setPushStatus({
+          text: '0 devices acknowledged push delivery — tap "Subscribe This Device" to refresh your subscription.',
+          tone: 'warn',
+        });
+      }
     } catch (err) {
-      setPushStatus(err instanceof Error ? err.message : 'Test push failed');
+      setPushStatus({
+        text: err instanceof Error ? err.message : 'Test push failed',
+        tone: 'err',
+      });
+    } finally {
+      setTestingPush(false);
     }
   };
 
@@ -127,32 +202,53 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
           {/* Web Push Subscription Box */}
           <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-3">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-              <span className="font-bold text-sm text-white flex items-center gap-2">
-                <Bell className="w-4 h-4 text-cyan-400 shrink-0" />
-                Native Mobile / Desktop Web Push
-              </span>
+              <div>
+                <span className="font-bold text-sm text-white flex items-center gap-2">
+                  <Bell className="w-4 h-4 text-cyan-400 shrink-0" />
+                  Native Mobile / Desktop Web Push
+                </span>
+                <span className="text-[11px] text-slate-400 block mt-0.5">
+                  Active subscribed devices: <b className="text-cyan-300">{subscriberCount}</b>
+                </span>
+              </div>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
+                  disabled={subscribing}
                   onClick={handleEnableBrowserPush}
-                  className="flex-1 sm:flex-none px-3 py-1.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-semibold cursor-pointer text-center"
+                  className="flex-1 sm:flex-none px-3 py-1.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-semibold cursor-pointer text-center flex items-center justify-center gap-1.5"
                 >
+                  {subscribing && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
                   Subscribe This Device
                 </button>
                 <button
                   type="button"
+                  disabled={testingPush}
                   onClick={handleTestPush}
-                  className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 cursor-pointer shrink-0"
+                  className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 cursor-pointer shrink-0 flex items-center gap-1.5"
                 >
+                  {testingPush && <Loader2 className="w-3.5 h-3.5 animate-spin text-cyan-400" />}
                   Send Test
                 </button>
               </div>
             </div>
 
             {pushStatus && (
-              <div className="p-2.5 rounded-xl bg-cyan-500/10 border border-cyan-400/30 text-cyan-200 flex items-center gap-2">
-                <CheckCircle2 className="w-4 h-4 shrink-0 text-cyan-400" />
-                <span>{pushStatus}</span>
+              <div
+                className={`p-2.5 rounded-xl border flex items-start gap-2 ${
+                  pushStatus.tone === 'ok'
+                    ? 'bg-cyan-500/10 border-cyan-400/30 text-cyan-200'
+                    : pushStatus.tone === 'warn'
+                      ? 'bg-amber-500/10 border-amber-400/30 text-amber-200'
+                      : 'bg-rose-500/15 border-rose-500/40 text-rose-200'
+                }`}
+              >
+                {pushStatus.tone === 'ok' ? (
+                  <CheckCircle2 className="w-4 h-4 shrink-0 text-cyan-400 mt-0.5" />
+                ) : (
+                  <AlertTriangle className="w-4 h-4 shrink-0 text-amber-400 mt-0.5" />
+                )}
+                <span>{pushStatus.text}</span>
               </div>
             )}
 

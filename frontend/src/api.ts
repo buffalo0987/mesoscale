@@ -11,6 +11,7 @@ import type {
 
 async function jsonFetch<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
+    cache: 'no-store',
     ...init,
     headers: {
       'Content-Type': 'application/json',
@@ -105,7 +106,7 @@ export const api = {
     jsonFetch<MapOverlayPayload>(`/api/map-overlay?lat=${lat}&lon=${lon}`),
 
   subscribePush: (sub: PushSubscriptionJSON) =>
-    jsonFetch<{ subscribed: boolean }>('/api/push/subscribe', {
+    jsonFetch<{ subscribed: boolean; subscriber_count?: number }>('/api/push/subscribe', {
       method: 'POST',
       body: JSON.stringify({
         endpoint: sub.endpoint,
@@ -114,7 +115,15 @@ export const api = {
       }),
     }),
 
-  sendTestPush: () => jsonFetch<{ ok: boolean; sent: number }>('/api/push/test', { method: 'POST' }),
+  sendTestPush: () =>
+    jsonFetch<{
+      ok: boolean;
+      sent: number;
+      subscriber_count?: number;
+      failed?: number;
+      suppressed?: string;
+      errors?: string[];
+    }>('/api/push/test', { method: 'POST' }),
 
   saveNotificationPrefs: (prefs: Partial<NotificationPrefs>) =>
     jsonFetch<{ notification_prefs: NotificationPrefs }>('/api/settings/notifications', {

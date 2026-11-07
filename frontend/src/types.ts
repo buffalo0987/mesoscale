@@ -71,6 +71,7 @@ export interface BootstrapPayload {
   app_name: string;
   pinned_locations: PinnedLocation[];
   vapid_public_key: string;
+  push_subscriber_count?: number;
   notification_prefs: NotificationPrefs;
   pws_config: PwsConfig;
 }

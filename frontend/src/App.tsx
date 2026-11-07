@@ -12,7 +12,12 @@ import { StormWinterPanel } from './components/StormWinterPanel';
 import { SubseasonalOutlookPanel } from './components/SubseasonalOutlookPanel';
 import { SynchronizedMeteogram } from './components/SynchronizedMeteogram';
 import { VerificationScoreboard } from './components/VerificationScoreboard';
-import type { PinnedLocation, UnitSystem } from './types';
+import type {
+  BootstrapPayload,
+  ForecastBundle,
+  PinnedLocation,
+  UnitSystem,
+} from './types';
 import { degToCompass, formatTemp, formatWind } from './units';
 
 type ActiveTab = 'forecast' | 'radar' | 'verification';
@@ -103,16 +108,70 @@ export const App: React.FC = () => {
   };
 
   const handlePinnedNew = async (loc: PinnedLocation) => {
+    queryClient.setQueryData<BootstrapPayload>(['bootstrap'], (old) =>
+      old
+        ? {
+            ...old,
+            pinned_locations: old.pinned_locations.some((l) => l.id === loc.id)
+              ? old.pinned_locations.map((l) => (l.id === loc.id ? loc : l))
+              : [...old.pinned_locations, loc],
+          }
+        : old
+    );
     setEphemeralTarget(null);
     setActiveLocationId(loc.id);
     await queryClient.invalidateQueries({ queryKey: ['bootstrap'] });
   };
 
+  const handleLocationUpdated = (updated: PinnedLocation) => {
+    queryClient.setQueryData<BootstrapPayload>(['bootstrap'], (old) =>
+      old
+        ? {
+            ...old,
+            pinned_locations: old.pinned_locations.map((l) =>
+              l.id === updated.id ? updated : l
+            ),
+          }
+        : old
+    );
+    queryClient.setQueryData<ForecastBundle>(['pinned-forecast', updated.id], (old) =>
+      old
+        ? {
+            ...old,
+            location: {
+              ...old.location,
+              name: updated.name,
+              address_label: updated.address_label,
+              alerts_enabled: updated.alerts_enabled,
+            },
+          }
+        : old
+    );
+    queryClient.invalidateQueries({ queryKey: ['bootstrap'] });
+  };
+
   const handleDeletePinned = async (id: number) => {
-    await api.deleteLocation(id);
     const remaining = pinnedLocations.filter((l) => l.id !== id);
-    setActiveLocationId(remaining[0]?.id ?? null);
-    await queryClient.invalidateQueries({ queryKey: ['bootstrap'] });
+    const nextId = activeLocationId === id ? (remaining[0]?.id ?? null) : activeLocationId;
+
+    queryClient.setQueryData<BootstrapPayload>(['bootstrap'], (old) =>
+      old
+        ? {
+            ...old,
+            pinned_locations: old.pinned_locations.filter((l) => l.id !== id),
+          }
+        : old
+    );
+    queryClient.removeQueries({ queryKey: ['pinned-forecast', id] });
+    queryClient.removeQueries({ queryKey: ['location-status', id] });
+    queryClient.removeQueries({ queryKey: ['verification', id] });
+    setActiveLocationId(nextId);
+
+    try {
+      await api.deleteLocation(id);
+    } finally {
+      await queryClient.invalidateQueries({ queryKey: ['bootstrap'] });
+    }
   };
 
   const handleManualRefresh = async () => {
@@ -189,7 +248,7 @@ export const App: React.FC = () => {
         onSelectEphemeral={(lat, lon, name) => setEphemeralTarget({ lat, lon, name })}
         onPinnedNew={handlePinnedNew}
         onDeletePinned={handleDeletePinned}
-        onLocationUpdated={() => queryClient.invalidateQueries({ queryKey: ['bootstrap'] })}
+        onLocationUpdated={handleLocationUpdated}
         onToggleUnits={toggleUnits}
         onOpenSettings={() => setSettingsOpen(true)}
       />
@@ -218,6 +277,7 @@ export const App: React.FC = () => {
                 units={units}
                 onRefresh={handleManualRefresh}
                 onPinnedFromEphemeral={handlePinnedNew}
+                onLocationUpdated={handleLocationUpdated}
                 isRefreshing={manualRefreshing}
               />
             </div>
@@ -408,6 +468,7 @@ export const App: React.FC = () => {
         <SettingsDrawer
           open={settingsOpen}
           vapidPublicKey={bootstrapQuery.data.vapid_public_key}
+          subscriberCount={bootstrapQuery.data.push_subscriber_count ?? 0}
           initialNotifPrefs={bootstrapQuery.data.notification_prefs}
           initialPwsConfig={bootstrapQuery.data.pws_config}
           onClose={() => setSettingsOpen(false)}

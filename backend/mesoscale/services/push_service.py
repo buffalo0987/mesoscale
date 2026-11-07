@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import logging
 import math
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -17,6 +18,19 @@ from pywebpush import WebPushException, webpush
 
 from mesoscale.db.app_store import AppStore
 from mesoscale.providers.base import NwsAlert
+
+logger = logging.getLogger("mesoscale.push")
+
+
+def _normalize_vapid_subject(subject: str) -> str:
+    """
+    Ensure RFC 8292 VAPID `sub` claim uses a real IANA TLD (`mailto:` or `https:`).
+    Apple's `web.push.apple.com` (iOS Safari PWA) rejects `.tailnet` / `.local` with 403 BadJwtToken.
+    """
+    raw = (subject or "").strip()
+    if not raw or raw.endswith((".tailnet", ".local")) or not raw.startswith(("mailto:", "https://")):
+        return "mailto:alerts@mesoscale.org"
+    return raw
 
 
 def _b64url_no_pad(data: bytes) -> str:
@@ -56,22 +70,24 @@ class WebPushService:
         self,
         app_store: AppStore,
         vapid_keys_path: Path,
-        vapid_subject: str = "mailto:weather@local.tailnet",
+        vapid_subject: str = "mailto:alerts@mesoscale.org",
     ) -> None:
         self.app_store = app_store
         self.vapid_keys_path = vapid_keys_path
-        self.vapid_subject = vapid_subject
+        self.vapid_subject = _normalize_vapid_subject(vapid_subject)
         self._public_key_b64: str = ""
         self._private_pem: str = ""
+        self._vapid: Vapid | None = None
 
     def ensure_vapid_keys(self) -> str:
-        if self._public_key_b64 and self._private_pem:
+        if self._public_key_b64 and self._private_pem and self._vapid is not None:
             return self._public_key_b64
 
         if self.vapid_keys_path.exists():
             data = json.loads(self.vapid_keys_path.read_text())
             self._public_key_b64 = data["public_key"]
             self._private_pem = data["private_pem"]
+            self._vapid = Vapid.from_pem(self._private_pem.encode("utf-8"))
             return self._public_key_b64
 
         self.vapid_keys_path.parent.mkdir(parents=True, exist_ok=True)
@@ -82,6 +98,7 @@ class WebPushService:
         )
         self._public_key_b64 = _b64url_no_pad(raw_pub)
         self._private_pem = vapid.private_pem().decode("utf-8")
+        self._vapid = vapid
         self.vapid_keys_path.write_text(
             json.dumps(
                 {"public_key": self._public_key_b64, "private_pem": self._private_pem},
@@ -108,7 +125,7 @@ class WebPushService:
     ) -> dict[str, Any]:
         prefs = await self.app_store.get_notification_prefs()
         if not prefs.get("enabled", True):
-            return {"sent": 0, "suppressed": "disabled"}
+            return {"sent": 0, "subscriber_count": 0, "suppressed": "disabled"}
 
         ref_now = now_utc or datetime.now(UTC)
         if (
@@ -121,13 +138,14 @@ class WebPushService:
                 str(prefs.get("quiet_end", "06:30")),
             )
         ):
-            return {"sent": 0, "suppressed": "quiet_hours"}
+            return {"sent": 0, "subscriber_count": 0, "suppressed": "quiet_hours"}
 
         subs = await self.app_store.list_push_subscriptions()
         if not subs:
-            return {"sent": 0, "suppressed": "no_subscribers"}
+            return {"sent": 0, "subscriber_count": 0, "suppressed": "no_subscribers"}
 
         self.ensure_vapid_keys()
+        assert self._vapid is not None
         payload_str = json.dumps(
             {
                 "title": title,
@@ -141,6 +159,7 @@ class WebPushService:
 
         sent = 0
         dead_endpoints: list[str] = []
+        errors: list[str] = []
         for sub in subs:
             sub_info = {
                 "endpoint": sub["endpoint"],
@@ -151,22 +170,37 @@ class WebPushService:
                     webpush,
                     subscription_info=sub_info,
                     data=payload_str,
-                    vapid_private_key=self._private_pem,
+                    vapid_private_key=self._vapid,
                     vapid_claims={"sub": self.vapid_subject},
                     ttl=3600,
+                    timeout=12.0,
                 )
                 sent += 1
             except WebPushException as exc:
                 status = getattr(exc.response, "status_code", None)
+                resp_text = getattr(exc.response, "text", "") or ""
                 if status in (404, 410):
                     dead_endpoints.append(sub["endpoint"])
-            except Exception:
-                continue
+                    errors.append(f"Expired subscription removed (HTTP {status})")
+                else:
+                    msg = f"Push gateway HTTP {status}: {resp_text[:120] or str(exc)[:120]}"
+                    logger.warning("WebPushException: %s", msg)
+                    errors.append(msg)
+            except Exception as exc:
+                msg = f"{type(exc).__name__}: {str(exc)[:120]}"
+                logger.warning("WebPush transport error: %s", msg)
+                errors.append(msg)
 
         for ep in dead_endpoints:
             await self.app_store.remove_push_subscription(ep)
 
-        return {"sent": sent, "pruned": len(dead_endpoints)}
+        return {
+            "sent": sent,
+            "subscriber_count": len(subs),
+            "failed": len(errors),
+            "pruned": len(dead_endpoints),
+            "errors": errors[:3],
+        }
 
     async def evaluate_and_notify_location(
         self,
@@ -219,7 +253,7 @@ class WebPushService:
                 tz_name=tz_name,
                 now_utc=ref_now,
             )
-            if res.get("suppressed") != "quiet_hours":
+            if res.get("sent", 0) > 0:
                 sent_cache[dedup_key] = ref_now.isoformat()
             dispatched.append({"key": dedup_key, **res})
 

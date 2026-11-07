@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import base64
+import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import httpx
 import polars as pl
 import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ec
 from mesoscale.config import Settings
 from mesoscale.main import create_app
 from mesoscale.providers.base import NwsAlert
@@ -162,4 +167,111 @@ async def test_clean_first_boot_and_quiet_hours_tornado_override(tmp_path: Path)
             assert len(ver_json["leaderboard"]) == 1
             assert ver_json["leaderboard"][0]["model_id"] == "nbm"
             assert len(ver_json["replay_72h"]) == 6
+
+
+@pytest.mark.asyncio
+async def test_real_vapid_webpush_crypto_and_location_rename_mute_delete(tmp_path: Path) -> None:
+    """
+    Exercises unmocked `pywebpush.webpush` + `Vapid.from_pem` + `http_ece` encryption against
+    a real NIST P-256 browser subscription keypair, plus post-pin nickname editing, muting, and deletion.
+    """
+    cfg = Settings(data_dir=tmp_path / "data", enable_scheduler=False)
+    app = create_app(cfg)
+
+    browser_priv = ec.generate_private_key(ec.SECP256R1())
+    browser_pub_bytes = browser_priv.public_key().public_bytes(
+        serialization.Encoding.X962, serialization.PublicFormat.UncompressedPoint
+    )
+    p256dh_b64 = base64.urlsafe_b64encode(browser_pub_bytes).rstrip(b"=").decode("ascii")
+    auth_b64 = base64.urlsafe_b64encode(os.urandom(16)).rstrip(b"=").decode("ascii")
+
+    async with app.router.lifespan_context(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+            sub_res = await client.post(
+                "/api/push/subscribe",
+                json={
+                    "endpoint": "https://web.push.apple.com/QTEST_REAL_CRYPTO_ENDPOINT",
+                    "keys": {"p256dh": p256dh_b64, "auth": auth_b64},
+                    "user_agent": "iPhone Safari PWA",
+                },
+            )
+            assert sub_res.status_code == 200
+            assert sub_res.json()["subscriber_count"] == 1
+
+            boot = (await client.get("/api/bootstrap")).json()
+            assert boot["push_subscriber_count"] == 1
+
+            # Force reload from persisted vapid_keys.json on disk to test Vapid.from_pem path
+            eng = app.state.engine
+            eng.push._vapid = None
+            eng.push.ensure_vapid_keys()
+            assert eng.push._vapid is not None
+
+            captured_calls: list[dict[str, object]] = []
+
+            def fake_pusher_send(self_pusher, data=None, headers=None, **kwargs):  # noqa: ANN001
+                captured_calls.append(
+                    {
+                        "data_len": len(data) if data else 0,
+                        "headers": dict(headers or {}),
+                        **kwargs,
+                    }
+                )
+                return SimpleNamespace(status_code=201, text="")
+
+            with patch("pywebpush.WebPusher.send", new=fake_pusher_send):
+                test_res = await client.post("/api/push/test")
+                assert test_res.status_code == 200
+                body = test_res.json()
+                assert body["sent"] == 1
+                assert body["subscriber_count"] == 1
+                assert body["failed"] == 0
+                assert len(captured_calls) == 1
+                hdrs = captured_calls[0]["headers"]
+                assert isinstance(hdrs, dict)
+                auth_hdr = str(hdrs.get("Authorization") or hdrs.get("authorization") or "")
+                assert auth_hdr.startswith("vapid t=")
+                assert int(captured_calls[0]["data_len"]) > 32
+
+            # Create, rename nickname, mute alerts, and delete location
+            loc = await eng.app_store.create_location(
+                name="123 Main St",
+                address_label="123 Main St, Norman, OK 73069",
+                admin1="Oklahoma",
+                country="US",
+                lat=35.2226,
+                lon=-97.4395,
+                elevation_m=357.0,
+                timezone_name="America/Chicago",
+                stations=[],
+            )
+            lid = loc["id"]
+
+            rename_res = await client.patch(
+                f"/api/locations/{lid}", json={"name": "My Truck Garage"}
+            )
+            assert rename_res.status_code == 200
+            updated_loc = rename_res.json()["location"]
+            assert updated_loc["name"] == "My Truck Garage"
+            assert updated_loc["address_label"] == "123 Main St, Norman, OK 73069"
+
+            mute_res = await client.patch(
+                f"/api/locations/{lid}", json={"alerts_enabled": False}
+            )
+            assert mute_res.status_code == 200
+            assert mute_res.json()["location"]["alerts_enabled"] is False
+
+            boot2 = (await client.get("/api/bootstrap")).json()
+            assert len(boot2["pinned_locations"]) == 1
+            assert boot2["pinned_locations"][0]["name"] == "My Truck Garage"
+            assert boot2["pinned_locations"][0]["alerts_enabled"] is False
+
+            del_res = await client.delete(f"/api/locations/{lid}")
+            assert del_res.status_code == 200
+            assert del_res.json()["deleted"] is True
+
+            boot3 = (await client.get("/api/bootstrap")).json()
+            assert boot3["pinned_locations"] == []
+
 

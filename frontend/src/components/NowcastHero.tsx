@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   AlertTriangle,
   Car,
+  Check,
   CheckCircle2,
   CloudLightning,
   CloudRain,
@@ -11,11 +12,13 @@ import {
   Gauge,
   Loader2,
   MapPin,
+  Pencil,
   RefreshCw,
   ShieldAlert,
   Snowflake,
   Sun,
   Wind,
+  X,
 } from 'lucide-react';
 import { api } from '../api';
 import type { ForecastBundle, PinnedLocation, UnitSystem } from '../types';
@@ -32,6 +35,7 @@ interface NowcastHeroProps {
   units: UnitSystem;
   onRefresh: () => void;
   onPinnedFromEphemeral: (loc: PinnedLocation) => void;
+  onLocationUpdated: (loc: PinnedLocation) => void;
   isRefreshing: boolean;
 }
 
@@ -53,16 +57,39 @@ export const NowcastHero: React.FC<NowcastHeroProps> = ({
   units,
   onRefresh,
   onPinnedFromEphemeral,
+  onLocationUpdated,
   isRefreshing,
 }) => {
   const [checkinSent, setCheckinSent] = useState<string | null>(null);
   const [pinning, setPinning] = useState(false);
   const [selected15mIdx, setSelected15mIdx] = useState<number | null>(null);
+  const [editingName, setEditingName] = useState(false);
+  const [draftName, setDraftName] = useState('');
+  const [savingName, setSavingName] = useState(false);
 
   const curHour = bundle.hourly[0];
   const obs = bundle.current_observation;
   const loc = bundle.location;
   const eng = bundle.engine_info;
+
+  useEffect(() => {
+    setEditingName(false);
+  }, [loc.id]);
+
+  const handleSaveName = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!loc.id) return;
+    const trimmed = draftName.trim();
+    if (!trimmed) return;
+    setSavingName(true);
+    try {
+      const res = await api.updateLocation(loc.id, { name: trimmed });
+      onLocationUpdated(res.location);
+      setEditingName(false);
+    } finally {
+      setSavingName(false);
+    }
+  };
   const displayTempC = obs?.temp_c ?? curHour?.temp_p50_c ?? null;
   const feelsC = obs?.feels_like_c ?? curHour?.feels_like_c ?? null;
   const wetBulbC = obs?.wet_bulb_c ?? curHour?.wet_bulb_c ?? null;
@@ -253,13 +280,83 @@ export const NowcastHero: React.FC<NowcastHeroProps> = ({
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 sm:gap-6">
           <div className="space-y-2.5 sm:space-y-3">
             <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-xl sm:text-2xl font-bold text-white">
-                {loc.name}
-                {loc.admin1 && loc.admin1 !== loc.name ? `, ${loc.admin1}` : ''}
-                {isInternational && loc.country && loc.country !== loc.name
-                  ? ` · ${loc.country}`
-                  : ''}
-              </h2>
+              {editingName && loc.id !== null ? (
+                <form
+                  onSubmit={handleSaveName}
+                  className="w-full sm:w-auto flex flex-col gap-1"
+                >
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="text"
+                      value={draftName}
+                      onChange={(e) => setDraftName(e.target.value)}
+                      maxLength={120}
+                      autoFocus
+                      placeholder="Nickname (e.g., Home, Parents)"
+                      className="flex-1 sm:w-64 px-3 py-1.5 rounded-xl bg-slate-900 border border-cyan-400/60 text-base sm:text-sm font-semibold text-white focus:outline-none focus:border-cyan-300"
+                    />
+                    <button
+                      type="submit"
+                      disabled={savingName || !draftName.trim()}
+                      className="px-2.5 py-1.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 disabled:opacity-50 text-slate-950 font-semibold text-xs flex items-center gap-1 cursor-pointer shrink-0"
+                    >
+                      {savingName ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <Check className="w-3.5 h-3.5" />
+                      )}
+                      Save
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditingName(false)}
+                      className="p-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 cursor-pointer shrink-0"
+                      title="Cancel"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+                  {loc.address_label &&
+                    loc.address_label.trim() &&
+                    (() => {
+                      const streetOrCity = loc.address_label.split(',')[0].trim();
+                      if (!streetOrCity || streetOrCity === draftName.trim()) return null;
+                      return (
+                        <button
+                          type="button"
+                          onClick={() => setDraftName(streetOrCity)}
+                          className="self-start text-[11px] text-cyan-300 hover:text-cyan-200 underline underline-offset-2 cursor-pointer"
+                        >
+                          Use street/city name ("{streetOrCity}")
+                        </button>
+                      );
+                    })()}
+                </form>
+              ) : (
+                <>
+                  <h2 className="text-xl sm:text-2xl font-bold text-white">
+                    {loc.name}
+                    {loc.admin1 && loc.admin1 !== loc.name ? `, ${loc.admin1}` : ''}
+                    {isInternational && loc.country && loc.country !== loc.name
+                      ? ` · ${loc.country}`
+                      : ''}
+                  </h2>
+                  {loc.id !== null && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDraftName(loc.name);
+                        setEditingName(true);
+                      }}
+                      title="Edit location nickname"
+                      aria-label="Edit location nickname"
+                      className="p-1.5 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-cyan-300 transition cursor-pointer"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </>
+              )}
               <span
                 className={`px-2.5 py-0.5 rounded-full text-[10px] sm:text-[11px] font-semibold border ${
                   eng.model_status === 'trained'

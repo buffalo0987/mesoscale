@@ -3,7 +3,7 @@ import { clientsClaim } from 'workbox-core';
 import { ExpirationPlugin } from 'workbox-expiration';
 import { cleanupOutdatedCaches, precacheAndRoute } from 'workbox-precaching';
 import { registerRoute } from 'workbox-routing';
-import { StaleWhileRevalidate } from 'workbox-strategies';
+import { NetworkFirst } from 'workbox-strategies';
 
 declare let self: ServiceWorkerGlobalScope & {
   __WB_MANIFEST: Array<{ url: string; revision: string | null }>;
@@ -14,15 +14,21 @@ clientsClaim();
 cleanupOutdatedCaches();
 precacheAndRoute(self.__WB_MANIFEST);
 
-// Cache forecast & bootstrap responses for instant cold-launch and storm cell-drop resilience
+// Purge legacy StaleWhileRevalidate v1 API cache so mutations reflect immediately
+self.addEventListener('activate', (event) => {
+  event.waitUntil(caches.delete('mesoscale-api-cache-v1'));
+});
+
+// Network-first API caching: always serves fresh live state when online, with offline storm fallback
 registerRoute(
   ({ url, request }) =>
     request.method === 'GET' &&
     (url.pathname.startsWith('/api/bootstrap') ||
       url.pathname.endsWith('/forecast') ||
       url.pathname.endsWith('/verification')),
-  new StaleWhileRevalidate({
-    cacheName: 'mesoscale-api-cache-v1',
+  new NetworkFirst({
+    cacheName: 'mesoscale-api-cache-v2',
+    networkTimeoutSeconds: 5,
     plugins: [
       new ExpirationPlugin({
         maxEntries: 35,

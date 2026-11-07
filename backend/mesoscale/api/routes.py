@@ -79,10 +79,11 @@ async def get_bootstrap(request: Request) -> dict[str, Any]:
     cleanly presents the Onboarding Search / Live GPS experience.
     """
     eng = _engine(request)
-    locations, notif_prefs, pws_cfg = await asyncio.gather(
+    locations, notif_prefs, pws_cfg, subs = await asyncio.gather(
         eng.app_store.list_locations(),
         eng.app_store.get_notification_prefs(),
         eng.app_store.get_pws_config(),
+        eng.app_store.list_push_subscriptions(),
     )
     safe_pws = {
         "enabled": bool(pws_cfg.get("enabled")),
@@ -94,6 +95,7 @@ async def get_bootstrap(request: Request) -> dict[str, Any]:
         "app_name": "Mesoscale",
         "pinned_locations": locations,
         "vapid_public_key": eng.push.public_key,
+        "push_subscriber_count": len(subs),
         "notification_prefs": notif_prefs,
         "pws_config": safe_pws,
     }
@@ -398,14 +400,16 @@ async def subscribe_push(request: Request, body: PushSubscribeRequest) -> dict[s
         auth=auth,
         user_agent=body.user_agent,
     )
-    return {"subscribed": True}
+    subs = await eng.app_store.list_push_subscriptions()
+    return {"subscribed": True, "subscriber_count": len(subs)}
 
 
 @router.post("/push/unsubscribe")
 async def unsubscribe_push(request: Request, body: PushUnsubscribeRequest) -> dict[str, Any]:
     eng = _engine(request)
     await eng.app_store.remove_push_subscription(body.endpoint)
-    return {"unsubscribed": True}
+    subs = await eng.app_store.list_push_subscriptions()
+    return {"unsubscribed": True, "subscriber_count": len(subs)}
 
 
 @router.post("/push/test")
