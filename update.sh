@@ -37,9 +37,12 @@ cd "$INSTALL_DIR"
 # 1. Pull Latest Git Code
 if [ -d ".git" ]; then
     echo -e "${CYAN}[1/4] Pulling latest git updates...${RESET}"
-    git pull --ff-only || {
+    if ! git config --global --get-all safe.directory 2>/dev/null | grep -Fxq "$INSTALL_DIR"; then
+        git config --global --add safe.directory "$INSTALL_DIR" 2>/dev/null || true
+    fi
+    git -c safe.directory="$INSTALL_DIR" pull --ff-only || {
         echo -e "${YELLOW}Warning: git pull --ff-only failed. Retrying normal pull...${RESET}"
-        git pull
+        git -c safe.directory="$INSTALL_DIR" pull
     }
 else
     echo -e "${YELLOW}[1/4] No .git directory found. Skipping git pull.${RESET}"
@@ -53,6 +56,7 @@ uv sync --no-dev
 echo -e "${CYAN}[3/4] Rebuilding React 19 PWA frontend...${RESET}"
 npm --prefix frontend --silent install --no-audit --no-fund
 npm --prefix frontend run build --silent
+$SUDO rm -rf backend/mesoscale/static_dist
 $SUDO mkdir -p backend/mesoscale/static_dist
 $SUDO cp -r frontend/dist/* backend/mesoscale/static_dist/
 

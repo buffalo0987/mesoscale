@@ -121,6 +121,9 @@ fi
 $SUDO mkdir -p "$DATA_DIR"
 $SUDO chown -R mesoscale:mesoscale "$DATA_DIR"
 $SUDO chown -R mesoscale:mesoscale "$INSTALL_DIR"
+if ! git config --global --get-all safe.directory 2>/dev/null | grep -Fxq "$INSTALL_DIR"; then
+    git config --global --add safe.directory "$INSTALL_DIR" 2>/dev/null || true
+fi
 
 # 8. Create & Enable Systemd Service
 SERVICE_FILE="/etc/systemd/system/mesoscale.service"
