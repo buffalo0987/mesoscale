@@ -318,19 +318,19 @@ export const RadarMesonetMap: React.FC<RadarMesonetMapProps> = ({
 
   return (
     <section className="glass-panel rounded-2xl overflow-hidden">
-      <div className="p-4 sm:px-6 border-b border-slate-800/80 flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+      <div className="p-3.5 sm:p-4 sm:px-6 border-b border-slate-800/80 flex flex-col lg:flex-row lg:items-center justify-between gap-2.5 sm:gap-3">
         <div>
-          <h3 className="text-base font-bold text-white flex items-center gap-2">
-            <Radar className="w-4 h-4 text-cyan-400" />
+          <h3 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
+            <Radar className="w-4 h-4 text-cyan-400 shrink-0" />
             Live NEXRAD / MRMS Radar & 5-Min Mesonet Towers
           </h3>
-          <p className="text-xs text-slate-400">
+          <p className="text-[11px] sm:text-xs text-slate-400 mt-0.5">
             Centered on {locationName} (dashed cyan ring = 8 km 5-point convective sampling perimeter).
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 text-xs">
-          <div className="inline-flex rounded-xl bg-slate-900 border border-slate-800 p-0.5">
+        <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-0.5 lg:flex-wrap text-xs">
+          <div className="inline-flex rounded-xl bg-slate-900 border border-slate-800 p-0.5 shrink-0">
             <button
               type="button"
               onClick={() => setRadarProduct('nexrad')}
@@ -354,7 +354,7 @@ export const RadarMesonetMap: React.FC<RadarMesonetMapProps> = ({
             </button>
           </div>
 
-          <div className="inline-flex rounded-xl bg-slate-900 border border-slate-800 p-0.5">
+          <div className="inline-flex rounded-xl bg-slate-900 border border-slate-800 p-0.5 shrink-0">
             {(['none', 'day1', 'day2'] as const).map((mode) => (
               <button
                 key={mode}
@@ -373,7 +373,7 @@ export const RadarMesonetMap: React.FC<RadarMesonetMapProps> = ({
           <button
             type="button"
             onClick={() => setShowStations((v) => !v)}
-            className={`px-2.5 py-1.5 rounded-xl border flex items-center gap-1.5 cursor-pointer ${
+            className={`px-2.5 py-1.5 rounded-xl border flex items-center gap-1.5 cursor-pointer shrink-0 ${
               showStations
                 ? 'bg-emerald-500/15 border-emerald-400/40 text-emerald-200'
                 : 'bg-slate-900 border-slate-800 text-slate-400'
@@ -385,16 +385,16 @@ export const RadarMesonetMap: React.FC<RadarMesonetMapProps> = ({
         </div>
       </div>
 
-      <div className="relative w-full h-[470px] bg-slate-950">
+      <div className="relative w-full h-[calc(100dvh-250px)] min-h-[360px] max-h-[500px] sm:h-[470px] sm:max-h-none bg-slate-950">
         <div ref={containerRef} className="w-full h-full" />
 
         {/* Radar Timeline Scrubber Bar */}
         {radarProduct === 'nexrad' && frames.length > 0 && (
-          <div className="absolute bottom-3 left-3 right-3 sm:left-6 sm:right-6 z-10 p-2.5 px-3.5 rounded-xl bg-slate-950/90 border border-slate-800 backdrop-blur-md flex items-center gap-3">
+          <div className="absolute bottom-3 left-3 right-3 sm:left-6 sm:right-6 z-10 p-2 sm:p-2.5 px-3 sm:px-3.5 rounded-xl bg-slate-950/90 border border-slate-800 backdrop-blur-md flex items-center gap-2.5 sm:gap-3">
             <button
               type="button"
               onClick={() => setPlaying((p) => !p)}
-              className="p-2 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold cursor-pointer"
+              className="p-2 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold cursor-pointer shrink-0"
               title={playing ? 'Pause radar loop' : 'Play 50-minute NEXRAD loop'}
             >
               {playing ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
@@ -410,15 +410,15 @@ export const RadarMesonetMap: React.FC<RadarMesonetMapProps> = ({
               }}
               className="flex-1 accent-cyan-400 cursor-pointer"
             />
-            <span className="text-xs font-mono font-semibold text-cyan-300 w-14 text-right">
+            <span className="text-xs font-mono font-semibold text-cyan-300 w-12 sm:w-14 text-right shrink-0">
               {currentFrame?.label || 'Live'}
             </span>
           </div>
         )}
 
-        <div className="absolute top-3 left-3 z-10 px-2.5 py-1 rounded-lg bg-slate-950/85 border border-slate-800 text-[10px] text-slate-300 flex items-center gap-2">
-          <Layers className="w-3 h-3 text-cyan-400" />
-          <span>Cyan pins: OK Mesonet (5m) · Indigo pins: ASOS</span>
+        <div className="absolute top-3 left-3 z-10 max-w-[calc(100%-56px)] px-2.5 py-1 rounded-lg bg-slate-950/85 border border-slate-800 text-[10px] text-slate-300 flex items-center gap-1.5">
+          <Layers className="w-3 h-3 text-cyan-400 shrink-0" />
+          <span className="truncate">Cyan: OK Mesonet (5m) · Indigo: ASOS</span>
         </div>
       </div>
     </section>

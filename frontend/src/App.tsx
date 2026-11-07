@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Award, BarChart3, Loader2, Radar } from 'lucide-react';
+import { Award, BarChart3, Loader2, Radar, RefreshCw } from 'lucide-react';
 import { api } from './api';
 import { DailyOutlookStrip } from './components/DailyOutlookStrip';
 import { LocationBar } from './components/LocationBar';
@@ -12,6 +12,7 @@ import { StormWinterPanel } from './components/StormWinterPanel';
 import { SynchronizedMeteogram } from './components/SynchronizedMeteogram';
 import { VerificationScoreboard } from './components/VerificationScoreboard';
 import type { PinnedLocation, UnitSystem } from './types';
+import { degToCompass, formatTemp, formatWind } from './units';
 
 type ActiveTab = 'forecast' | 'radar' | 'verification';
 
@@ -191,9 +192,9 @@ export const App: React.FC = () => {
         onOpenSettings={() => setSettingsOpen(true)}
       />
 
-      <main className="max-w-7xl w-full mx-auto px-3 sm:px-6 py-5 space-y-5 flex-1">
+      <main className="max-w-7xl w-full mx-auto px-3 sm:px-6 pt-3.5 pb-24 sm:py-5 space-y-4 sm:space-y-5 flex-1">
         {isLoadingBundle ? (
-          <div className="glass-panel rounded-2xl p-16 flex flex-col items-center justify-center gap-3 text-slate-300 text-sm">
+          <div className="glass-panel rounded-2xl p-12 sm:p-16 flex flex-col items-center justify-center gap-3 text-slate-300 text-sm text-center">
             <Loader2 className="w-6 h-6 animate-spin text-cyan-400" />
             <span>
               {ephemeralTarget
@@ -202,22 +203,69 @@ export const App: React.FC = () => {
             </span>
           </div>
         ) : bundleError ? (
-          <div className="p-6 rounded-2xl bg-rose-950/50 border border-rose-500/40 text-rose-200 text-sm">
+          <div className="p-5 sm:p-6 rounded-2xl bg-rose-950/50 border border-rose-500/40 text-rose-200 text-sm">
             Forecast fetch error:{' '}
             {bundleError instanceof Error ? bundleError.message : 'Unknown error'}
           </div>
         ) : activeBundle ? (
           <>
-            <NowcastHero
-              bundle={activeBundle}
-              units={units}
-              onRefresh={handleManualRefresh}
-              onPinnedFromEphemeral={handlePinnedNew}
-              isRefreshing={manualRefreshing}
-            />
+            {/* Full Hero always shown on Desktop; on Mobile shown on Forecast tab */}
+            <div className={activeTab === 'forecast' ? 'block' : 'hidden sm:block'}>
+              <NowcastHero
+                bundle={activeBundle}
+                units={units}
+                onRefresh={handleManualRefresh}
+                onPinnedFromEphemeral={handlePinnedNew}
+                isRefreshing={manualRefreshing}
+              />
+            </div>
 
-            {/* Primary View Switcher */}
-            <div className="flex items-center gap-2 overflow-x-auto pb-1">
+            {/* Compact Mobile Summary Bar on Radar / Scoreboard tabs so views start at top of screen */}
+            {activeTab !== 'forecast' && (
+              <div className="sm:hidden glass-panel rounded-xl px-3.5 py-2.5 flex items-center justify-between gap-2 text-xs">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="font-bold text-white truncate">
+                    {activeBundle.location.name}
+                  </span>
+                  <span className="font-extrabold text-cyan-300">
+                    {formatTemp(
+                      activeBundle.current_observation?.temp_c ??
+                        activeBundle.hourly[0]?.temp_p50_c ??
+                        null,
+                      units,
+                      0
+                    )}
+                  </span>
+                  <span className="text-slate-400 truncate">
+                    ·{' '}
+                    {degToCompass(
+                      activeBundle.current_observation?.wind_dir_deg ??
+                        activeBundle.hourly[0]?.wind_dir_deg
+                    )}{' '}
+                    {formatWind(
+                      activeBundle.current_observation?.wind_ms ??
+                        activeBundle.hourly[0]?.wind_p50_ms ??
+                        null,
+                      units
+                    )}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleManualRefresh}
+                  disabled={manualRefreshing}
+                  className="p-1.5 rounded-lg bg-slate-800/80 text-slate-300 shrink-0 cursor-pointer"
+                  title="Refresh"
+                >
+                  <RefreshCw
+                    className={`w-3.5 h-3.5 ${manualRefreshing ? 'animate-spin text-cyan-400' : ''}`}
+                  />
+                </button>
+              </div>
+            )}
+
+            {/* Desktop Primary View Switcher */}
+            <div className="hidden sm:flex items-center gap-2 overflow-x-auto pb-1">
               <button
                 type="button"
                 onClick={() => setActiveTab('forecast')}
@@ -257,7 +305,7 @@ export const App: React.FC = () => {
             </div>
 
             {activeTab === 'forecast' && (
-              <div className="space-y-5">
+              <div className="space-y-4 sm:space-y-5">
                 <StormWinterPanel bundle={activeBundle} units={units} />
                 <SynchronizedMeteogram hourly={activeBundle.hourly} units={units} />
                 <DailyOutlookStrip daily={activeBundle.daily} units={units} />
@@ -288,6 +336,62 @@ export const App: React.FC = () => {
           </>
         ) : null}
       </main>
+
+      {/* Thumb-Friendly Mobile Bottom Navigation Bar */}
+      {activeBundle && (
+        <nav
+          aria-label="Mobile view navigation"
+          className="sm:hidden fixed bottom-0 inset-x-0 z-30 safe-bottom bg-[#070b14]/92 backdrop-blur-xl border-t border-slate-800/90"
+        >
+          <div className="grid grid-cols-3 px-2 py-1.5 gap-1">
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab('forecast');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              className={`py-1.5 rounded-xl flex flex-col items-center justify-center gap-0.5 text-[11px] font-semibold transition cursor-pointer ${
+                activeTab === 'forecast'
+                  ? 'bg-cyan-500/15 text-cyan-300'
+                  : 'text-slate-400 active:text-slate-200'
+              }`}
+            >
+              <BarChart3 className="w-4 h-4" />
+              <span>Forecast</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab('radar');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              className={`py-1.5 rounded-xl flex flex-col items-center justify-center gap-0.5 text-[11px] font-semibold transition cursor-pointer ${
+                activeTab === 'radar'
+                  ? 'bg-cyan-500/15 text-cyan-300'
+                  : 'text-slate-400 active:text-slate-200'
+              }`}
+            >
+              <Radar className="w-4 h-4" />
+              <span>Live Radar</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab('verification');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+              className={`py-1.5 rounded-xl flex flex-col items-center justify-center gap-0.5 text-[11px] font-semibold transition cursor-pointer ${
+                activeTab === 'verification'
+                  ? 'bg-cyan-500/15 text-cyan-300'
+                  : 'text-slate-400 active:text-slate-200'
+              }`}
+            >
+              <Award className="w-4 h-4" />
+              <span>Scoreboard</span>
+            </button>
+          </div>
+        </nav>
+      )}
 
       {bootstrapQuery.data && (
         <SettingsDrawer

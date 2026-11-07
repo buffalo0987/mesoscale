@@ -54,6 +54,7 @@ export const NowcastHero: React.FC<NowcastHeroProps> = ({
 }) => {
   const [checkinSent, setCheckinSent] = useState<string | null>(null);
   const [pinning, setPinning] = useState(false);
+  const [selected15mIdx, setSelected15mIdx] = useState<number | null>(null);
 
   const curHour = bundle.hourly[0];
   const obs = bundle.current_observation;
@@ -171,16 +172,16 @@ export const NowcastHero: React.FC<NowcastHeroProps> = ({
       )}
 
       {/* Main Telemetry Hero Card */}
-      <div className="glass-panel rounded-2xl p-5 sm:p-7">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-          <div className="space-y-3">
+      <div className="glass-panel rounded-2xl p-4 sm:p-7">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 sm:gap-6">
+          <div className="space-y-2.5 sm:space-y-3">
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-xl sm:text-2xl font-bold text-white">
                 {loc.name}
                 {loc.admin1 ? `, ${loc.admin1}` : ''}
               </h2>
               <span
-                className={`px-2.5 py-0.5 rounded-full text-[11px] font-semibold border ${
+                className={`px-2.5 py-0.5 rounded-full text-[10px] sm:text-[11px] font-semibold border ${
                   eng.model_status === 'trained'
                     ? 'bg-emerald-500/15 border-emerald-400/30 text-emerald-300'
                     : 'bg-cyan-500/15 border-cyan-400/30 text-cyan-300'
@@ -191,7 +192,7 @@ export const NowcastHero: React.FC<NowcastHeroProps> = ({
                   : 'Multi-Model Consensus + Kalman'}
               </span>
               {Math.abs(kalmanDelta) >= 0.4 && (
-                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-amber-500/15 border border-amber-400/30 text-amber-200">
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] sm:text-[11px] font-medium bg-amber-500/15 border border-amber-400/30 text-amber-200">
                   5m Kalman Nudge {kalmanDelta > 0 ? '+' : ''}
                   {kalmanDelta.toFixed(1)}°{units === 'imperial' ? 'F' : 'C'}
                 </span>
@@ -207,7 +208,7 @@ export const NowcastHero: React.FC<NowcastHeroProps> = ({
               </button>
             </div>
 
-            <div className="flex items-baseline gap-4">
+            <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
               <div className="text-5xl sm:text-6xl font-extrabold tracking-tight text-white">
                 {formatTemp(displayTempC, units, 0)}
               </div>
@@ -235,12 +236,12 @@ export const NowcastHero: React.FC<NowcastHeroProps> = ({
 
             {/* Paired Research-Grade Ground Truth Towers */}
             {loc.stations?.length > 0 && (
-              <div className="text-[11px] text-slate-400 flex flex-wrap items-center gap-x-2 gap-y-1">
+              <div className="text-[10px] sm:text-[11px] text-slate-400 flex flex-wrap items-center gap-x-1.5 sm:gap-x-2 gap-y-1">
                 <span className="text-slate-500">Ground truth blend:</span>
                 {loc.stations.map((s) => (
                   <span
                     key={s.station_id}
-                    className="px-2 py-0.5 rounded bg-slate-900/90 border border-slate-800 text-slate-300"
+                    className="px-1.5 sm:px-2 py-0.5 rounded bg-slate-900/90 border border-slate-800 text-slate-300"
                   >
                     {s.station_id} ({s.source === 'ok_mesonet' ? 'OK Mesonet 5m' : 'ASOS'} ·{' '}
                     {(s.distance_km * 0.621371).toFixed(1)} mi · {Math.round(s.blend_weight * 100)}%)
@@ -254,43 +255,43 @@ export const NowcastHero: React.FC<NowcastHeroProps> = ({
           </div>
 
           {/* Right-hand Meteorological Vitals Grid */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-2 gap-3 shrink-0 lg:w-80">
-            <div className="p-3 rounded-xl bg-slate-900/70 border border-slate-800/80">
-              <div className="text-[11px] text-slate-400 flex items-center gap-1">
-                <Droplets className="w-3 h-3 text-cyan-400" /> Dewpoint / Wet-Bulb
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-2 gap-2.5 sm:gap-3 shrink-0 lg:w-80">
+            <div className="p-2.5 sm:p-3 rounded-xl bg-slate-900/70 border border-slate-800/80">
+              <div className="text-[10px] sm:text-[11px] text-slate-400 flex items-center gap-1">
+                <Droplets className="w-3 h-3 text-cyan-400 shrink-0" /> Dewpoint / Wet-Bulb
               </div>
-              <div className="text-sm font-semibold text-white mt-0.5">
+              <div className="text-xs sm:text-sm font-semibold text-white mt-0.5">
                 {formatTemp(dewpointC, units)} /{' '}
                 <span className="text-cyan-300">{formatTemp(wetBulbC, units)}</span>
               </div>
             </div>
-            <div className="p-3 rounded-xl bg-slate-900/70 border border-slate-800/80">
-              <div className="text-[11px] text-slate-400 flex items-center gap-1">
-                <Wind className="w-3 h-3 text-sky-400" /> Wind & Gust
+            <div className="p-2.5 sm:p-3 rounded-xl bg-slate-900/70 border border-slate-800/80">
+              <div className="text-[10px] sm:text-[11px] text-slate-400 flex items-center gap-1">
+                <Wind className="w-3 h-3 text-sky-400 shrink-0" /> Wind & Gust
               </div>
-              <div className="text-sm font-semibold text-white mt-0.5">
+              <div className="text-xs sm:text-sm font-semibold text-white mt-0.5">
                 {degToCompass(windDir)} {formatWind(windMs, units)}
-                {gustMs ? <span className="text-slate-400 text-xs"> (G {formatWind(gustMs, units)})</span> : null}
+                {gustMs ? <span className="text-slate-400 text-[11px] sm:text-xs"> (G {formatWind(gustMs, units)})</span> : null}
               </div>
             </div>
-            <div className="p-3 rounded-xl bg-slate-900/70 border border-slate-800/80">
-              <div className="text-[11px] text-slate-400 flex items-center gap-1">
-                <CloudRain className="w-3 h-3 text-indigo-400" /> Next-Hr Calibrated PoP
+            <div className="p-2.5 sm:p-3 rounded-xl bg-slate-900/70 border border-slate-800/80">
+              <div className="text-[10px] sm:text-[11px] text-slate-400 flex items-center gap-1">
+                <CloudRain className="w-3 h-3 text-indigo-400 shrink-0" /> Next-Hr Calibrated PoP
               </div>
-              <div className="text-sm font-semibold text-white mt-0.5">
+              <div className="text-xs sm:text-sm font-semibold text-white mt-0.5">
                 {curHour ? `${Math.round(curHour.precip_prob * 100)}%` : '—'}
                 {curHour && curHour.ring_precip_max_mm >= 1.0 && (
-                  <span className="text-[11px] text-amber-300 ml-1.5">
+                  <span className="text-[10px] sm:text-[11px] text-amber-300 ml-1">
                     (8km: {formatPrecip(curHour.ring_precip_max_mm, units)})
                   </span>
                 )}
               </div>
             </div>
-            <div className="p-3 rounded-xl bg-slate-900/70 border border-slate-800/80">
-              <div className="text-[11px] text-slate-400 flex items-center gap-1">
-                <Gauge className="w-3 h-3 text-emerald-400" /> Pressure / θe
+            <div className="p-2.5 sm:p-3 rounded-xl bg-slate-900/70 border border-slate-800/80">
+              <div className="text-[10px] sm:text-[11px] text-slate-400 flex items-center gap-1">
+                <Gauge className="w-3 h-3 text-emerald-400 shrink-0" /> Pressure / θe
               </div>
-              <div className="text-sm font-semibold text-white mt-0.5">
+              <div className="text-xs sm:text-sm font-semibold text-white mt-0.5">
                 {curHour ? `${Math.round(curHour.pressure_hpa)} hPa · ${Math.round(curHour.theta_e_k)}K` : '—'}
               </div>
             </div>
@@ -304,19 +305,36 @@ export const NowcastHero: React.FC<NowcastHeroProps> = ({
             (acc, p) => acc + (p.precip_mm || 0) + (p.ring_precip_max_mm || 0),
             0
           );
+          const selPt = selected15mIdx !== null ? first16[selected15mIdx] : null;
+          const selLabel = selPt
+            ? new Date(selPt.valid_time_utc).toLocaleTimeString([], {
+                hour: 'numeric',
+                minute: '2-digit',
+              })
+            : null;
+          const selHasRain =
+            selPt !== null && (selPt.precip_mm > 0 || selPt.ring_precip_max_mm > 0);
+
           return (
-            <div className="mt-5 pt-4 border-t border-slate-800/80">
-              <div className="flex items-center justify-between text-xs text-slate-400 mb-2">
+            <div className="mt-4 sm:mt-5 pt-3.5 sm:pt-4 border-t border-slate-800/80">
+              <div className="flex flex-wrap items-center justify-between gap-1 text-xs text-slate-400 mb-2">
                 <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
                   <span className="font-medium text-slate-300">
-                    HRRR 15-Minute Precipitation Nowcast
+                    HRRR 15-Min Precipitation Nowcast
                   </span>
-                  <span className="text-[10px] text-slate-500">
+                  <span className="text-[10px] text-slate-500 hidden sm:inline">
                     (Cyan = Exact Point · Purple = 8 km Vicinity)
                   </span>
                 </div>
                 <span className="text-[11px] font-mono shrink-0">
-                  {total15mPrecip === 0 ? (
+                  {selPt && selLabel ? (
+                    <span className="text-cyan-300 font-sans font-medium">
+                      {selLabel}:{' '}
+                      {selHasRain
+                        ? `Point ${formatPrecip(selPt.precip_mm, units)} · 8km ${formatPrecip(selPt.ring_precip_max_mm, units)}`
+                        : `Dry (${formatPrecip(0, units)})`}
+                    </span>
+                  ) : total15mPrecip === 0 ? (
                     <span className="text-emerald-400/90 font-sans font-medium">
                       All Dry Next 4h
                     </span>
@@ -325,24 +343,46 @@ export const NowcastHero: React.FC<NowcastHeroProps> = ({
                   )}
                 </span>
               </div>
-              <div className="grid grid-cols-8 sm:grid-cols-12 md:grid-cols-16 gap-1.5">
-                {first16.map((pt) => {
+
+              <div className="grid grid-cols-16 gap-1 sm:gap-1.5">
+                {first16.map((pt, idx) => {
                   const dt = new Date(pt.valid_time_utc);
                   const label = dt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+                  const shortHour = (() => {
+                    const h24 = dt.getHours();
+                    const sfx = h24 >= 12 ? 'p' : 'a';
+                    const h12 = h24 % 12 || 12;
+                    const mins = dt.getMinutes();
+                    return mins === 0 ? `${h12}${sfx}` : `${h12}:${String(mins).padStart(2, '0')}`;
+                  })();
                   const ringH = Math.min(100, Math.round((pt.ring_precip_max_mm / 4.0) * 100));
                   const ptH = Math.min(100, Math.round((pt.precip_mm / 4.0) * 100));
                   const hasRain = pt.precip_mm > 0 || pt.ring_precip_max_mm > 0;
+                  const isSelected = selected15mIdx === idx;
                   const tooltipText = hasRain
                     ? `${label}: Point ${formatPrecip(pt.precip_mm, units)} · 8 km Vicinity ${formatPrecip(pt.ring_precip_max_mm, units)}`
                     : `${label}: Dry (${formatPrecip(0, units)})`;
 
+                  const showOnMobile = idx % 4 === 0;
+                  const showOnTablet = idx % 2 === 0;
+
                   return (
-                    <div
+                    <button
                       key={pt.valid_time_utc}
-                      className="flex flex-col items-center gap-1 group cursor-help"
+                      type="button"
+                      onClick={() =>
+                        setSelected15mIdx((prev) => (prev === idx ? null : idx))
+                      }
+                      className="flex flex-col items-center gap-1 group cursor-pointer focus:outline-none min-w-0"
                       title={tooltipText}
                     >
-                      <div className="w-full h-10 rounded bg-slate-900/90 border border-slate-800/70 group-hover:border-slate-700 relative overflow-hidden flex items-end transition">
+                      <div
+                        className={`w-full h-9 sm:h-10 rounded bg-slate-900/90 border relative overflow-hidden flex items-end transition ${
+                          isSelected
+                            ? 'border-cyan-400 ring-1 ring-cyan-400/40'
+                            : 'border-slate-800/70 group-hover:border-slate-700'
+                        }`}
+                      >
                         {ringH > 0 && (
                           <div
                             className="w-full bg-indigo-500/35 absolute bottom-0"
@@ -359,10 +399,17 @@ export const NowcastHero: React.FC<NowcastHeroProps> = ({
                           <div className="w-full h-0.5 bg-slate-800/80 absolute bottom-0" />
                         )}
                       </div>
-                      <span className="text-[9px] text-slate-500 group-hover:text-slate-300 truncate w-full text-center transition">
+                      {/* Desktop: full compact time on every bar; Tablet: every 30m; Phone: every 60m */}
+                      <span className="hidden lg:block text-[9px] text-slate-500 group-hover:text-slate-300 truncate w-full text-center transition">
                         {label.replace(' ', '')}
                       </span>
-                    </div>
+                      <span className="hidden sm:block lg:hidden text-[9px] text-slate-500 whitespace-nowrap">
+                        {showOnTablet ? shortHour : '\u00A0'}
+                      </span>
+                      <span className="sm:hidden text-[9px] text-slate-500 whitespace-nowrap">
+                        {showOnMobile ? shortHour : '\u00A0'}
+                      </span>
+                    </button>
                   );
                 })}
               </div>
@@ -372,13 +419,13 @@ export const NowcastHero: React.FC<NowcastHeroProps> = ({
 
         {/* 1-Tap Backyard Ground-Truth Precip Check-In */}
         {loc.id && (
-          <div className="mt-4 pt-3.5 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2">
-            <span className="text-xs text-slate-400">
+          <div className="mt-4 pt-3.5 border-t border-slate-800/80 flex flex-col sm:flex-row sm:flex-wrap sm:items-center justify-between gap-2">
+            <span className="text-[11px] sm:text-xs text-slate-400">
               Backyard check-in (teaches local PoP & ice/rain boundary):
             </span>
-            <div className="flex flex-wrap items-center gap-1.5">
+            <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar sm:flex-wrap pb-0.5">
               {checkinSent ? (
-                <span className="text-xs text-emerald-300 flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/15 border border-emerald-500/30">
+                <span className="text-xs text-emerald-300 flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/15 border border-emerald-500/30 shrink-0">
                   <CheckCircle2 className="w-3.5 h-3.5" /> Logged "{checkinSent}" to ground truth!
                 </span>
               ) : (
@@ -387,7 +434,7 @@ export const NowcastHero: React.FC<NowcastHeroProps> = ({
                     key={opt.id}
                     type="button"
                     onClick={() => handleCheckin(opt.id)}
-                    className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-xs text-slate-200 flex items-center gap-1.5 transition cursor-pointer"
+                    className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-xs text-slate-200 flex items-center gap-1.5 transition cursor-pointer shrink-0"
                   >
                     {opt.icon}
                     {opt.label}

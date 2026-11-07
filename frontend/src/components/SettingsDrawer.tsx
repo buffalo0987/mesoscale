@@ -90,43 +90,43 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/65 backdrop-blur-sm">
-      <div className="w-full max-w-lg bg-[#090f1d] border-l border-slate-800 h-full overflow-y-auto p-6 space-y-6">
-        <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+      <div className="w-full max-w-lg bg-[#090f1d] border-l border-slate-800 h-full overflow-y-auto p-4 sm:p-6 pb-10 safe-top safe-bottom space-y-5 sm:space-y-6">
+        <div className="flex items-center justify-between gap-2 pb-3 border-b border-slate-800">
           <div>
-            <h2 className="text-lg font-bold text-white">Push Alerts & Station Settings</h2>
-            <p className="text-xs text-slate-400">
+            <h2 className="text-base sm:text-lg font-bold text-white">Push Alerts & Station Settings</h2>
+            <p className="text-[11px] sm:text-xs text-slate-400">
               Native VAPID Web Push (Tailscale HTTPS ready) & backyard PWS integration
             </p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="p-2 rounded-lg bg-slate-900 text-slate-400 hover:text-white cursor-pointer"
+            className="p-2 rounded-lg bg-slate-900 text-slate-400 hover:text-white cursor-pointer shrink-0"
           >
             <X className="w-4 h-4" />
           </button>
         </div>
 
-        <form onSubmit={handleSaveAll} className="space-y-6 text-xs">
+        <form onSubmit={handleSaveAll} className="space-y-5 sm:space-y-6 text-xs">
           {/* Web Push Subscription Box */}
-          <div className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-3">
-            <div className="flex items-center justify-between">
+          <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
               <span className="font-bold text-sm text-white flex items-center gap-2">
-                <Bell className="w-4 h-4 text-cyan-400" />
+                <Bell className="w-4 h-4 text-cyan-400 shrink-0" />
                 Native Mobile / Desktop Web Push
               </span>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
                   onClick={handleEnableBrowserPush}
-                  className="px-3 py-1.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-semibold cursor-pointer"
+                  className="flex-1 sm:flex-none px-3 py-1.5 rounded-lg bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-semibold cursor-pointer text-center"
                 >
                   Subscribe This Device
                 </button>
                 <button
                   type="button"
                   onClick={handleTestPush}
-                  className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 cursor-pointer"
+                  className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 cursor-pointer shrink-0"
                 >
                   Send Test
                 </button>
@@ -256,7 +256,7 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
               Connect a backyard WeatherFlow Tempest or Ambient Weather station. Mesoscale automatically runs solar radiation-spike QC against nearby Oklahoma Mesonet / ASOS towers before blending.
             </p>
 
-            <div className="grid grid-cols-2 gap-2.5">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               <div>
                 <span className="text-[11px] text-slate-400 block mb-1">Provider</span>
                 <select
@@ -264,7 +264,7 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
                   onChange={(e) =>
                     setPws({ ...pws, provider: e.target.value as PwsConfig['provider'] })
                   }
-                  className="w-full px-2.5 py-2 rounded-lg bg-slate-950 border border-slate-700 text-white"
+                  className="w-full px-2.5 py-2 rounded-lg bg-slate-950 border border-slate-700 text-base sm:text-xs text-white"
                 >
                   <option value="none">Disabled</option>
                   <option value="tempest">WeatherFlow Tempest</option>
@@ -278,7 +278,7 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
                   value={pws.station_id}
                   onChange={(e) => setPws({ ...pws, station_id: e.target.value })}
                   placeholder="e.g., 98421"
-                  className="w-full px-2.5 py-2 rounded-lg bg-slate-950 border border-slate-700 text-white"
+                  className="w-full px-2.5 py-2 rounded-lg bg-slate-950 border border-slate-700 text-base sm:text-xs text-white"
                 />
               </div>
             </div>
@@ -292,7 +292,7 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
                 value={pws.api_key || ''}
                 onChange={(e) => setPws({ ...pws, api_key: e.target.value })}
                 placeholder="Paste personal access token..."
-                className="w-full px-2.5 py-2 rounded-lg bg-slate-950 border border-slate-700 text-white"
+                className="w-full px-2.5 py-2 rounded-lg bg-slate-950 border border-slate-700 text-base sm:text-xs text-white"
               />
             </div>
           </div>

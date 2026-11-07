@@ -65,9 +65,9 @@ export const LocationBar: React.FC<LocationBarProps> = ({
   };
 
   return (
-    <header className="sticky top-0 z-30 border-b border-slate-800/80 bg-[#070b14]/90 backdrop-blur-xl">
+    <header className="sticky top-0 z-30 safe-top border-b border-slate-800/80 bg-[#070b14]/90 backdrop-blur-xl">
       <div className="max-w-7xl mx-auto px-3 sm:px-6 h-14 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-3 min-w-0 overflow-x-auto no-scrollbar">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0 overflow-x-auto no-scrollbar">
           <div className="flex items-center gap-2 shrink-0 pr-2 border-r border-slate-800">
             <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-cyan-400 to-indigo-500 flex items-center justify-center text-slate-950 font-bold">
               <Radar className="w-4 h-4" />
@@ -82,14 +82,14 @@ export const LocationBar: React.FC<LocationBarProps> = ({
               return (
                 <div
                   key={loc.id}
-                  className={`group flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition shrink-0 cursor-pointer ${
+                  className={`group flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-medium transition shrink-0 cursor-pointer ${
                     isActive
                       ? 'bg-cyan-500/15 text-cyan-200 border border-cyan-400/35'
                       : 'bg-slate-900/70 text-slate-400 hover:text-slate-200 border border-slate-800/70'
                   }`}
                   onClick={() => onSelectPinned(loc.id)}
                 >
-                  <span>{loc.name}</span>
+                  <span className="max-w-[110px] sm:max-w-none truncate">{loc.name}</span>
                   {isTraining ? (
                     <Loader2 className="w-3 h-3 text-amber-400 animate-spin" />
                   ) : loc.model_status === 'trained' ? (
@@ -115,9 +115,9 @@ export const LocationBar: React.FC<LocationBarProps> = ({
             })}
 
             {ephemeralLabel && (
-              <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-indigo-500/20 text-indigo-200 border border-indigo-400/40 shrink-0">
+              <div className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-xs font-medium bg-indigo-500/20 text-indigo-200 border border-indigo-400/40 shrink-0">
                 <Navigation className="w-3 h-3 text-indigo-300" />
-                <span>{ephemeralLabel}</span>
+                <span className="max-w-[100px] sm:max-w-none truncate">{ephemeralLabel}</span>
                 <span className="text-[10px] uppercase tracking-wider text-indigo-300/80">Live</span>
               </div>
             )}
@@ -125,7 +125,7 @@ export const LocationBar: React.FC<LocationBarProps> = ({
             <button
               type="button"
               onClick={() => setSearchOpen((v) => !v)}
-              className="p-1.5 px-2.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 text-xs flex items-center gap-1 shrink-0 cursor-pointer"
+              className="p-1.5 px-2 sm:px-2.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 text-xs flex items-center gap-1 shrink-0 cursor-pointer"
               title="Search or add location"
             >
               <Plus className="w-3.5 h-3.5 text-cyan-400" />
@@ -134,7 +134,7 @@ export const LocationBar: React.FC<LocationBarProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
           <button
             type="button"
             onClick={handleGps}
@@ -146,7 +146,7 @@ export const LocationBar: React.FC<LocationBarProps> = ({
           <button
             type="button"
             onClick={onToggleUnits}
-            className="px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-xs font-semibold text-slate-200 transition cursor-pointer"
+            className="px-2 sm:px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-[11px] sm:text-xs font-semibold text-slate-200 transition cursor-pointer"
           >
             {units === 'imperial' ? '°F · mph' : '°C · m/s'}
           </button>
@@ -162,31 +162,31 @@ export const LocationBar: React.FC<LocationBarProps> = ({
       </div>
 
       {searchOpen && (
-        <div className="border-t border-slate-800 bg-slate-950/95 px-4 py-4">
+        <div className="border-t border-slate-800 bg-slate-950/95 px-3 sm:px-4 py-3.5 sm:py-4">
           <div className="max-w-2xl mx-auto space-y-3">
             <form onSubmit={runSearch} className="flex items-center gap-2">
-              <div className="relative flex-1">
+              <div className="relative flex-1 min-w-0">
                 <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Check any city/ZIP instantly, or pin to train AI..."
-                  className="w-full pl-9 pr-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-sm text-white focus:outline-none focus:border-cyan-400"
+                  placeholder="Search city or ZIP..."
+                  className="w-full pl-9 pr-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-base sm:text-sm text-white focus:outline-none focus:border-cyan-400"
                   autoFocus
                 />
               </div>
               <button
                 type="submit"
                 disabled={busy}
-                className="px-4 py-2 rounded-xl bg-cyan-500 text-slate-950 font-semibold text-xs cursor-pointer"
+                className="px-3.5 sm:px-4 py-2 rounded-xl bg-cyan-500 text-slate-950 font-semibold text-xs cursor-pointer shrink-0"
               >
                 {busy ? '...' : 'Search'}
               </button>
               <button
                 type="button"
                 onClick={() => setSearchOpen(false)}
-                className="p-2 text-slate-400 hover:text-white cursor-pointer"
+                className="p-2 text-slate-400 hover:text-white cursor-pointer shrink-0"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -197,16 +197,16 @@ export const LocationBar: React.FC<LocationBarProps> = ({
                 {results.map((r) => (
                   <div
                     key={`${r.name}-${r.lat}-${r.lon}`}
-                    className="p-2.5 px-3.5 flex items-center justify-between gap-2 text-xs"
+                    className="p-2.5 px-3 sm:px-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs"
                   >
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
                       <MapPin className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-                      <span className="font-medium text-white">
+                      <span className="font-medium text-white truncate">
                         {r.name}
                         {r.admin1 ? `, ${r.admin1}` : ''}
                       </span>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center justify-end gap-2 shrink-0">
                       <button
                         type="button"
                         onClick={() => {

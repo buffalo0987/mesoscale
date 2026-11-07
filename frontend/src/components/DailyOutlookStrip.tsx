@@ -45,12 +45,12 @@ export const DailyOutlookStrip: React.FC<DailyOutlookStripProps> = ({ daily, uni
 
   return (
     <section className="glass-panel rounded-2xl p-4 sm:p-6 space-y-3">
-      <div className="flex items-center justify-between">
-        <h3 className="text-base font-bold text-white flex items-center gap-2">
-          <Calendar className="w-4 h-4 text-cyan-400" />
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+        <h3 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
+          <Calendar className="w-4 h-4 text-cyan-400 shrink-0" />
           10-Day Probabilistic Daily Outlook
         </h3>
-        <span className="text-[11px] text-slate-400">
+        <span className="text-[10px] sm:text-[11px] text-slate-400">
           Translucent bar = P10–P90 tail uncertainty · Solid bar = Expected Min–Max
         </span>
       </div>
@@ -72,10 +72,10 @@ export const DailyOutlookStrip: React.FC<DailyOutlookStripProps> = ({ daily, uni
           return (
             <div
               key={d.date}
-              className="py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs"
+              className="py-2.5 flex flex-wrap sm:flex-nowrap items-center justify-between gap-x-3 gap-y-1.5 text-xs"
             >
-              <div className="flex items-center justify-between sm:w-48 shrink-0">
-                <div className="flex items-center gap-2.5">
+              <div className="order-1 flex items-center gap-2 sm:justify-between sm:w-48 shrink-0">
+                <div className="flex items-center gap-2">
                   {dayIcon(d)}
                   <span className="font-semibold text-white">{dayLabel}</span>
                   {d.has_high_bust_risk && (
@@ -87,14 +87,18 @@ export const DailyOutlookStrip: React.FC<DailyOutlookStripProps> = ({ daily, uni
                     </span>
                   )}
                 </div>
-                <span className="text-[11px] font-mono text-sky-300 w-12 text-right">
-                  {d.precip_prob_max >= 0.05 ? `${Math.round(d.precip_prob_max * 100)}%` : ''}
-                </span>
+                {d.precip_prob_max >= 0.05 ? (
+                  <span className="text-[11px] font-mono text-sky-300 sm:w-12 sm:text-right">
+                    {Math.round(d.precip_prob_max * 100)}%
+                  </span>
+                ) : (
+                  <span className="hidden sm:inline sm:w-12" />
+                )}
               </div>
 
               {/* Probabilistic Range Bar */}
-              <div className="flex items-center gap-3 flex-1 max-w-md">
-                <span className="w-10 text-right font-mono text-slate-400">
+              <div className="order-3 sm:order-2 flex items-center gap-2.5 sm:gap-3 w-full sm:w-auto sm:flex-1 sm:max-w-md">
+                <span className="w-9 sm:w-10 text-right font-mono text-slate-400">
                   {formatTemp(d.temp_min_c, units)}
                 </span>
                 <div className="flex-1 h-2.5 rounded-full bg-slate-900 relative overflow-hidden">
@@ -108,12 +112,12 @@ export const DailyOutlookStrip: React.FC<DailyOutlookStripProps> = ({ daily, uni
                     style={{ left: `${innerLeft}%`, width: `${innerWidth}%` }}
                   />
                 </div>
-                <span className="w-10 font-mono font-bold text-white">
+                <span className="w-9 sm:w-10 font-mono font-bold text-white">
                   {formatTemp(d.temp_max_c, units)}
                 </span>
               </div>
 
-              <div className="flex items-center justify-end gap-4 sm:w-44 text-[11px] text-slate-400 font-mono shrink-0">
+              <div className="order-2 sm:order-3 flex items-center justify-end gap-2.5 sm:gap-4 sm:w-44 text-[11px] text-slate-400 font-mono shrink-0">
                 <span>
                   {d.precip_total_mm >= 0.25 ? formatPrecip(d.precip_total_mm, units) : '—'}
                 </span>

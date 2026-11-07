@@ -114,11 +114,11 @@ export const StormWinterPanel: React.FC<StormWinterPanelProps> = ({ bundle, unit
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
-        className="w-full px-5 py-3.5 flex items-center justify-between gap-3 text-left hover:bg-slate-900/40 transition cursor-pointer"
+        className="w-full px-3.5 sm:px-5 py-3 sm:py-3.5 flex items-center justify-between gap-2.5 text-left hover:bg-slate-900/40 transition cursor-pointer"
       >
-        <div className="flex flex-wrap items-center gap-2.5">
-          <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-white">
-            <CloudLightning className="w-4 h-4 text-amber-400" />
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-semibold text-white">
+            <CloudLightning className="w-4 h-4 text-amber-400 shrink-0" />
             Storm & Winter Diagnostics
           </span>
           {sw.auto_active ? (
@@ -127,7 +127,10 @@ export const StormWinterPanel: React.FC<StormWinterPanelProps> = ({ bundle, unit
             </span>
           ) : (
             <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-800/90 text-slate-400 border border-slate-700/70">
-              Quiet Regime · Tap to Inspect SPC / CAPE / Wet-Bulb
+              <span className="sm:hidden">Quiet Regime · Tap to Inspect</span>
+              <span className="hidden sm:inline">
+                Quiet Regime · Tap to Inspect SPC / CAPE / Wet-Bulb
+              </span>
             </span>
           )}
           {sw.freezing_rain_hours_48h > 0 && (
@@ -142,7 +145,7 @@ export const StormWinterPanel: React.FC<StormWinterPanelProps> = ({ bundle, unit
       </button>
 
       {expanded && (
-        <div className="px-5 pb-5 pt-2 border-t border-slate-800/80 grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div className="px-3.5 sm:px-5 pb-4 sm:pb-5 pt-2 border-t border-slate-800/80 grid grid-cols-1 lg:grid-cols-3 gap-3.5 sm:gap-4">
           {/* Column 1: NOAA SPC Day 1-3 Convective Outlook */}
           <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800/80 space-y-2.5">
             <div className="flex items-center justify-between">
