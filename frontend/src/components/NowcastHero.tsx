@@ -298,47 +298,77 @@ export const NowcastHero: React.FC<NowcastHeroProps> = ({
         </div>
 
         {/* HRRR 15-Minute Sub-Hourly Precipitation Nowcast Strip */}
-        {bundle.nowcast_15m.length > 0 && (
-          <div className="mt-5 pt-4 border-t border-slate-800/80">
-            <div className="flex items-center justify-between text-xs text-slate-400 mb-2">
-              <span className="font-medium text-slate-300">
-                HRRR 15-Minute Sub-Hourly Nowcast (Point vs. 8 km Convective Ring)
-              </span>
-              <span>Next {Math.round((bundle.nowcast_15m.length * 15) / 60)} hours</span>
-            </div>
-            <div className="grid grid-cols-8 sm:grid-cols-12 md:grid-cols-16 gap-1.5">
-              {bundle.nowcast_15m.slice(0, 16).map((pt) => {
-                const dt = new Date(pt.valid_time_utc);
-                const label = dt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-                const ringH = Math.min(100, Math.round((pt.ring_precip_max_mm / 4.0) * 100));
-                const ptH = Math.min(100, Math.round((pt.precip_mm / 4.0) * 100));
-                return (
-                  <div key={pt.valid_time_utc} className="flex flex-col items-center gap-1">
-                    <div className="w-full h-10 rounded bg-slate-900/90 border border-slate-800/70 relative overflow-hidden flex items-end">
-                      {ringH > 0 && (
-                        <div
-                          className="w-full bg-indigo-500/30 absolute bottom-0"
-                          style={{ height: `${Math.max(12, ringH)}%` }}
-                          title={`8 km max: ${formatPrecip(pt.ring_precip_max_mm, units)}`}
-                        />
-                      )}
-                      {ptH > 0 && (
-                        <div
-                          className="w-full bg-cyan-400 relative z-10"
-                          style={{ height: `${Math.max(12, ptH)}%` }}
-                          title={`Exact point: ${formatPrecip(pt.precip_mm, units)}`}
-                        />
-                      )}
-                    </div>
-                    <span className="text-[9px] text-slate-500 truncate w-full text-center">
-                      {label.replace(' ', '')}
+        {bundle.nowcast_15m.length > 0 && (() => {
+          const first16 = bundle.nowcast_15m.slice(0, 16);
+          const total15mPrecip = first16.reduce(
+            (acc, p) => acc + (p.precip_mm || 0) + (p.ring_precip_max_mm || 0),
+            0
+          );
+          return (
+            <div className="mt-5 pt-4 border-t border-slate-800/80">
+              <div className="flex items-center justify-between text-xs text-slate-400 mb-2">
+                <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                  <span className="font-medium text-slate-300">
+                    HRRR 15-Minute Precipitation Nowcast
+                  </span>
+                  <span className="text-[10px] text-slate-500">
+                    (Cyan = Exact Point · Purple = 8 km Vicinity)
+                  </span>
+                </div>
+                <span className="text-[11px] font-mono shrink-0">
+                  {total15mPrecip === 0 ? (
+                    <span className="text-emerald-400/90 font-sans font-medium">
+                      All Dry Next 4h
                     </span>
-                  </div>
-                );
-              })}
+                  ) : (
+                    <span>Next {Math.round((first16.length * 15) / 60)} hrs</span>
+                  )}
+                </span>
+              </div>
+              <div className="grid grid-cols-8 sm:grid-cols-12 md:grid-cols-16 gap-1.5">
+                {first16.map((pt) => {
+                  const dt = new Date(pt.valid_time_utc);
+                  const label = dt.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+                  const ringH = Math.min(100, Math.round((pt.ring_precip_max_mm / 4.0) * 100));
+                  const ptH = Math.min(100, Math.round((pt.precip_mm / 4.0) * 100));
+                  const hasRain = pt.precip_mm > 0 || pt.ring_precip_max_mm > 0;
+                  const tooltipText = hasRain
+                    ? `${label}: Point ${formatPrecip(pt.precip_mm, units)} · 8 km Vicinity ${formatPrecip(pt.ring_precip_max_mm, units)}`
+                    : `${label}: Dry (${formatPrecip(0, units)})`;
+
+                  return (
+                    <div
+                      key={pt.valid_time_utc}
+                      className="flex flex-col items-center gap-1 group cursor-help"
+                      title={tooltipText}
+                    >
+                      <div className="w-full h-10 rounded bg-slate-900/90 border border-slate-800/70 group-hover:border-slate-700 relative overflow-hidden flex items-end transition">
+                        {ringH > 0 && (
+                          <div
+                            className="w-full bg-indigo-500/35 absolute bottom-0"
+                            style={{ height: `${Math.max(12, ringH)}%` }}
+                          />
+                        )}
+                        {ptH > 0 && (
+                          <div
+                            className="w-full bg-cyan-400 relative z-10"
+                            style={{ height: `${Math.max(12, ptH)}%` }}
+                          />
+                        )}
+                        {!hasRain && (
+                          <div className="w-full h-0.5 bg-slate-800/80 absolute bottom-0" />
+                        )}
+                      </div>
+                      <span className="text-[9px] text-slate-500 group-hover:text-slate-300 truncate w-full text-center transition">
+                        {label.replace(' ', '')}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* 1-Tap Backyard Ground-Truth Precip Check-In */}
         {loc.id && (
