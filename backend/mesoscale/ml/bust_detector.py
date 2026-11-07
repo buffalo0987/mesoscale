@@ -93,7 +93,10 @@ def evaluate_hourly_diagnostics(
 
 
 def summarize_storm_winter_mode(
-    hourly_rows: list[dict[str, Any]], spc_summary: dict[str, Any], active_alerts: list[dict[str, Any]]
+    hourly_rows: list[dict[str, Any]],
+    spc_summary: dict[str, Any],
+    active_alerts: list[dict[str, Any]],
+    hail_risk: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Determine whether context-aware Storm & Winter Mode should auto-expand and summarize peak signals."""
     next_48 = hourly_rows[:48]
@@ -109,9 +112,11 @@ def summarize_storm_winter_mode(
     ]
     freezing_rain_hours = [r for r in winter_hours if r.get("precip_type") == "freezing_rain"]
     bust_hours = [r for r in next_48 if r.get("bust_risk_level") == "high"]
+    hail_status = str((hail_risk or {}).get("status") or "none")
 
     auto_active = bool(
         spc_summary.get("has_severe_risk")
+        or hail_status in ("watch", "approaching", "imminent")
         or max_cape >= 600.0
         or len(winter_hours) > 0
         or len(bust_hours) > 0

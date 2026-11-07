@@ -30,6 +30,9 @@ export const api = {
   searchLocations: (q: string) =>
     jsonFetch<{ results: GeoSearchItem[] }>(`/api/locations/search?q=${encodeURIComponent(q)}`),
 
+  reverseGeocode: (lat: number, lon: number) =>
+    jsonFetch<{ result: GeoSearchItem }>(`/api/locations/reverse?lat=${lat}&lon=${lon}`),
+
   getEphemeralForecast: (lat: number, lon: number, name?: string) => {
     const params = new URLSearchParams({ lat: String(lat), lon: String(lon) });
     if (name) params.set('name', name);
@@ -38,14 +41,27 @@ export const api = {
 
   pinLocation: (payload: {
     name?: string;
+    custom_name?: string;
+    address_label?: string;
     admin1?: string;
+    country?: string;
     lat: number;
     lon: number;
     elevation_m?: number;
     timezone?: string;
+    alerts_enabled?: boolean;
   }) =>
     jsonFetch<{ location: PinnedLocation }>('/api/locations/pin', {
       method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  updateLocation: (
+    id: number,
+    payload: { name?: string; address_label?: string; alerts_enabled?: boolean }
+  ) =>
+    jsonFetch<{ location: PinnedLocation }>(`/api/locations/${id}`, {
+      method: 'PATCH',
       body: JSON.stringify(payload),
     }),
 

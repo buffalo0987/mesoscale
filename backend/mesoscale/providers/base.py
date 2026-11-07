@@ -44,6 +44,8 @@ class GeoSearchResult:
     lon: float
     elevation_m: float
     timezone: str
+    display_address: str = ""
+    result_type: str = "city"  # 'address' | 'coordinates' | 'postal' | 'city'
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -62,6 +64,9 @@ class NwsAlert:
     onset_utc: str | None
     expires_utc: str | None
     geometry: dict[str, Any] | None
+    max_hail_in: float | None = None
+    hail_threat: str = ""
+    max_wind_mph: float | None = None
 
     @property
     def is_life_threatening(self) -> bool:
@@ -74,9 +79,17 @@ class NwsAlert:
             or sev == "extreme"
         )
 
+    @property
+    def has_hail_threat(self) -> bool:
+        if self.max_hail_in is not None and self.max_hail_in > 0.0:
+            return True
+        combined = f"{self.headline} {self.description} {self.instruction}".lower()
+        return "hail" in combined
+
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
         d["is_life_threatening"] = self.is_life_threatening
+        d["has_hail_threat"] = self.has_hail_threat
         return d
 
 

@@ -9,6 +9,7 @@ import { OnboardingView } from './components/OnboardingView';
 import { RadarMesonetMap } from './components/RadarMesonetMap';
 import { SettingsDrawer } from './components/SettingsDrawer';
 import { StormWinterPanel } from './components/StormWinterPanel';
+import { SubseasonalOutlookPanel } from './components/SubseasonalOutlookPanel';
 import { SynchronizedMeteogram } from './components/SynchronizedMeteogram';
 import { VerificationScoreboard } from './components/VerificationScoreboard';
 import type { PinnedLocation, UnitSystem } from './types';
@@ -188,6 +189,7 @@ export const App: React.FC = () => {
         onSelectEphemeral={(lat, lon, name) => setEphemeralTarget({ lat, lon, name })}
         onPinnedNew={handlePinnedNew}
         onDeletePinned={handleDeletePinned}
+        onLocationUpdated={() => queryClient.invalidateQueries({ queryKey: ['bootstrap'] })}
         onToggleUnits={toggleUnits}
         onOpenSettings={() => setSettingsOpen(true)}
       />
@@ -309,6 +311,7 @@ export const App: React.FC = () => {
                 <StormWinterPanel bundle={activeBundle} units={units} />
                 <SynchronizedMeteogram hourly={activeBundle.hourly} units={units} />
                 <DailyOutlookStrip daily={activeBundle.daily} units={units} />
+                <SubseasonalOutlookPanel subseasonal={activeBundle.subseasonal} units={units} />
               </div>
             )}
 
@@ -318,6 +321,14 @@ export const App: React.FC = () => {
                 lon={activeBundle.location.lon}
                 locationName={activeBundle.location.name}
                 units={units}
+                onSelectEphemeral={(lat, lon, name) => {
+                  setEphemeralTarget({ lat, lon, name });
+                  setActiveTab('forecast');
+                }}
+                onPinnedNew={(loc) => {
+                  handlePinnedNew(loc);
+                  setActiveTab('forecast');
+                }}
               />
             )}
 

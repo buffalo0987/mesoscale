@@ -85,6 +85,8 @@ function renderSpcPill(dayLabel: string, risk: SpcRiskDay) {
 
 export const StormWinterPanel: React.FC<StormWinterPanelProps> = ({ bundle, units }) => {
   const sw = bundle.storm_winter;
+  const hailRisk = bundle.hail_risk;
+  const spcHail = sw.spc.day1_hail;
   const [expanded, setExpanded] = useState<boolean>(sw.auto_active);
 
   useEffect(() => {
@@ -138,6 +140,30 @@ export const StormWinterPanel: React.FC<StormWinterPanelProps> = ({ bundle, unit
               Ice Glaze Risk ({sw.freezing_rain_hours_48h}h)
             </span>
           )}
+          {hailRisk &&
+            (hailRisk.status === 'imminent' ||
+              hailRisk.status === 'approaching' ||
+              hailRisk.status === 'watch') && (
+              <span
+                className={`px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                  hailRisk.status === 'watch'
+                    ? 'bg-amber-500/20 text-amber-200 border-amber-400/40'
+                    : 'bg-rose-500/25 text-rose-200 border-rose-400/60'
+                }`}
+              >
+                {hailRisk.status === 'watch'
+                  ? `Hail Watch (${
+                      hailRisk.spc_day1_hail_prob_pct > 0
+                        ? `${hailRisk.spc_day1_hail_prob_pct}% SPC`
+                        : `${hailRisk.nearby_cells_count} Cell`
+                    })`
+                  : `Hail Shield · ${
+                      hailRisk.eta_minutes !== null
+                        ? `~${hailRisk.eta_minutes}m`
+                        : hailRisk.hail_label
+                    }`}
+              </span>
+            )}
         </div>
         <span className="text-slate-400 shrink-0">
           {expanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
@@ -146,19 +172,51 @@ export const StormWinterPanel: React.FC<StormWinterPanelProps> = ({ bundle, unit
 
       {expanded && (
         <div className="px-3.5 sm:px-5 pb-4 sm:pb-5 pt-2 border-t border-slate-800/80 grid grid-cols-1 lg:grid-cols-3 gap-3.5 sm:gap-4">
-          {/* Column 1: NOAA SPC Day 1-3 Convective Outlook */}
+          {/* Column 1: NOAA SPC Day 1-3 Convective + Hail Watchdog */}
           <div className="p-4 rounded-xl bg-slate-950/60 border border-slate-800/80 space-y-2.5">
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
                 <ShieldAlert className="w-3.5 h-3.5 text-amber-400" />
-                NOAA SPC Convective Outlook
+                NOAA SPC & Hail Watchdog
               </span>
-              <span className="text-[10px] text-slate-500">Polygon Point-in-Poly</span>
+              <span className="text-[10px] text-slate-500">Polygon + NEXRAD L3</span>
             </div>
             <div className="space-y-2">
               {renderSpcPill('Day 1 (Today)', sw.spc.day1)}
               {renderSpcPill('Day 2 (Tomorrow)', sw.spc.day2)}
               {renderSpcPill('Day 3', sw.spc.day3)}
+              {spcHail && (
+                <div className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-slate-900/80 border border-slate-800/90">
+                  <span className="text-xs text-slate-400 font-medium">Day 1 Hail Prob</span>
+                  <span
+                    className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold border ${
+                      spcHail.sig_hail
+                        ? 'bg-fuchsia-500/25 border-fuchsia-400/60 text-fuchsia-200'
+                        : spcHail.prob_pct >= 15
+                          ? 'bg-amber-500/20 border-amber-400/50 text-amber-200'
+                          : spcHail.prob_pct >= 5
+                            ? 'bg-emerald-500/15 border-emerald-400/40 text-emerald-200'
+                            : 'bg-slate-800/70 border-slate-700/60 text-slate-400'
+                    }`}
+                  >
+                    {spcHail.label}
+                  </span>
+                </div>
+              )}
+              {hailRisk && (
+                <div
+                  className={`p-2.5 rounded-xl border text-[11px] leading-snug ${
+                    hailRisk.status === 'imminent' || hailRisk.status === 'approaching'
+                      ? 'bg-rose-950/60 border-rose-500/50 text-rose-100'
+                      : hailRisk.status === 'watch'
+                        ? 'bg-amber-950/40 border-amber-500/35 text-amber-100'
+                        : 'bg-slate-900/60 border-slate-800 text-slate-400'
+                  }`}
+                >
+                  <span className="font-semibold text-slate-200">2-Min NEXRAD Shield: </span>
+                  {hailRisk.headline}
+                </div>
+              )}
             </div>
           </div>
 

@@ -14,6 +14,8 @@ export interface StationMeta {
 export interface PinnedLocation {
   id: number;
   name: string;
+  address_label?: string;
+  alerts_enabled?: boolean;
   admin1: string;
   country: string;
   lat: number;
@@ -36,12 +38,18 @@ export interface GeoSearchItem {
   lon: number;
   elevation_m: number;
   timezone: string;
+  display_address?: string;
+  result_type?: 'address' | 'coordinates' | 'postal' | 'city';
 }
 
 export interface NotificationPrefs {
   enabled: boolean;
   nws_warnings: boolean;
   nws_watches: boolean;
+  hail_alerts?: boolean;
+  hail_min_size_in?: number;
+  hail_lead_minutes?: number;
+  hail_bypass_quiet_hours?: boolean;
   model_temp_shift_f: number;
   frontal_bust_risk: boolean;
   freezing_rain_risk: boolean;
@@ -153,6 +161,10 @@ export interface NwsAlertItem {
   onset_utc: string | null;
   expires_utc: string | null;
   is_life_threatening: boolean;
+  max_hail_in?: number | null;
+  hail_threat?: string;
+  max_wind_mph?: number | null;
+  has_hail_threat?: boolean;
 }
 
 export interface SpcRiskDay {
@@ -162,12 +174,91 @@ export interface SpcRiskDay {
   color: string;
 }
 
+export interface SpcHailDay {
+  prob_pct: number;
+  sig_hail: boolean;
+  label: string;
+}
+
+export interface HailCellThreat {
+  cell_key: string;
+  nexrad_id: string;
+  storm_id: string;
+  lat: number;
+  lon: number;
+  distance_km: number;
+  distance_mi: number;
+  bearing_from_target: string;
+  speed_mph: number;
+  heading_deg: number;
+  eta_minutes: number;
+  cpa_miss_km: number;
+  poh_pct: number;
+  posh_pct: number;
+  max_hail_in: number;
+  hail_label: string;
+  in_arrival_cone: boolean;
+}
+
+export interface HailRiskSummary {
+  status: 'none' | 'watch' | 'approaching' | 'imminent';
+  headline: string;
+  eta_minutes: number | null;
+  max_hail_in: number;
+  hail_label: string;
+  nws_alert_event: string;
+  spc_day1_hail_prob_pct: number;
+  spc_day1_sig_hail: boolean;
+  nearby_cells_count: number;
+  approaching_cells: HailCellThreat[];
+}
+
+export interface SubseasonalWeekCard {
+  week_index: number;
+  title: string;
+  days_label: string;
+  start_date: string;
+  end_date: string;
+  skill_tier: string;
+  emos_shrinkage_alpha: number;
+  temp_signal: 'warmer' | 'near_normal' | 'colder';
+  temp_anomaly_c: number;
+  warm_prob_pct: number;
+  cold_prob_pct: number;
+  high_p50_c: number;
+  high_p10_c: number;
+  high_p90_c: number;
+  normal_high_c: number;
+  low_p50_c: number;
+  low_p10_c: number;
+  low_p90_c: number;
+  normal_low_c: number;
+  precip_signal: 'wetter' | 'near_normal' | 'drier';
+  precip_anomaly_pct: number;
+  wet_prob_pct: number;
+  precip_p50_mm: number;
+  normal_precip_mm: number;
+  freeze_prob_pct: number;
+  cpc_temp_badge: string | null;
+  cpc_precip_badge: string | null;
+  summary: string;
+}
+
+export interface SubseasonalSummary {
+  available: boolean;
+  ensemble_members?: number;
+  local_microclimate_offset_c?: number;
+  methodology: string;
+  weeks: SubseasonalWeekCard[];
+}
+
 export interface StormWinterSummary {
   auto_active: boolean;
   spc: {
     day1: SpcRiskDay;
     day2: SpcRiskDay;
     day3: SpcRiskDay;
+    day1_hail?: SpcHailDay;
     has_severe_risk: boolean;
     has_thunder_risk: boolean;
   };
@@ -196,6 +287,8 @@ export interface ForecastBundle {
   nowcast_15m: SubhourlyPoint[];
   hourly: HourlyForecast[];
   daily: DailyForecast[];
+  subseasonal?: SubseasonalSummary;
+  hail_risk?: HailRiskSummary;
   alerts: NwsAlertItem[];
   storm_winter: StormWinterSummary;
   recent_checkins: Array<{
@@ -245,8 +338,10 @@ export interface GeoJsonFeatureCollection {
 export interface MapOverlayPayload {
   stations_geojson: GeoJsonFeatureCollection;
   alerts_geojson: GeoJsonFeatureCollection;
+  hail_cells_geojson?: GeoJsonFeatureCollection;
   spc_day1_geojson: GeoJsonFeatureCollection;
   spc_day2_geojson: GeoJsonFeatureCollection;
+  spc_day1_hail_geojson?: GeoJsonFeatureCollection;
   ring_geojson: GeoJsonFeatureCollection;
   radar_frames: Array<{ offset_minutes: number; label: string; tile_url: string }>;
   mrms_tile_url: string;

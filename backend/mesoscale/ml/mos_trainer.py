@@ -104,34 +104,40 @@ def compute_consensus_predictions(
     q_mat = prior_t[:, None] + spread[:, None] * z_scores[None, :]
     q_mat = apply_aci_scaling(q_mat, aux["lead_h"], aci_state)
 
-    # Precipitation probability consensus incorporating 8 km convective ring proximity
-    nbm_pop = np.nan_to_num(
+    # Precipitation probability & QPF consensus with dynamic non-NaN model weight renormalization
+    # (prevents QPF under-prediction outside CONUS such as Aruba where HRRR/NBM are absent)
+    has_nbm_pop = "nbm_precip_prob" in wide_df.columns
+    nbm_pop_raw = (
         wide_df["nbm_precip_prob"].cast(pl.Float64).to_numpy() / 100.0
-        if "nbm_precip_prob" in wide_df.columns
-        else np.zeros(n),
-        nan=0.0,
+        if has_nbm_pop
+        else np.full(n, np.nan, dtype=np.float64)
     )
-    hrrr_p = np.nan_to_num(
-        wide_df["hrrr_precip_mm"].cast(pl.Float64).to_numpy()
-        if "hrrr_precip_mm" in wide_df.columns
-        else np.zeros(n),
-        nan=0.0,
+    qpf_weights = (
+        ("hrrr_precip_mm", 0.36),
+        ("rrfs_precip_mm", 0.14),
+        ("nbm_precip_mm", 0.25),
+        ("ecmwf_ifs_precip_mm", 0.15),
+        ("ecmwf_aifs_precip_mm", 0.05),
+        ("gfs_precip_mm", 0.05),
     )
-    ifs_p = np.nan_to_num(
-        wide_df["ecmwf_ifs_precip_mm"].cast(pl.Float64).to_numpy()
-        if "ecmwf_ifs_precip_mm" in wide_df.columns
-        else np.zeros(n),
-        nan=0.0,
-    )
-    nbm_p = np.nan_to_num(
-        wide_df["nbm_precip_mm"].cast(pl.Float64).to_numpy()
-        if "nbm_precip_mm" in wide_df.columns
-        else np.zeros(n),
-        nan=0.0,
-    )
-    point_qpf = 0.4 * hrrr_p + 0.35 * nbm_p + 0.25 * ifs_p
+    qpf_num = np.zeros(n, dtype=np.float64)
+    qpf_den = np.zeros(n, dtype=np.float64)
+    for col_name, w in qpf_weights:
+        if col_name in wide_df.columns:
+            arr = wide_df[col_name].cast(pl.Float64).to_numpy()
+            valid = ~np.isnan(arr)
+            qpf_num = np.where(valid, qpf_num + w * np.nan_to_num(arr, nan=0.0), qpf_num)
+            qpf_den = np.where(valid, qpf_den + w, qpf_den)
+    point_qpf = np.where(qpf_den > 0.0, qpf_num / np.maximum(qpf_den, 1e-6), 0.0)
+
     ring_boost = np.clip(aux["ring_precip_max_mm"] / 12.0, 0.0, 0.35)
-    pop_cal = np.clip(np.maximum(nbm_pop, np.where(point_qpf >= 0.25, 0.55, 0.05) + ring_boost), 0.0, 0.98)
+    qpf_implied_pop = np.where(
+        point_qpf >= 0.25,
+        np.clip(0.48 + point_qpf * 0.10, 0.48, 0.92),
+        np.where(point_qpf >= 0.05, 0.20, 0.05),
+    )
+    nbm_pop = np.nan_to_num(nbm_pop_raw, nan=0.0)
+    pop_cal = np.clip(np.maximum(nbm_pop, qpf_implied_pop + ring_boost), 0.0, 0.98)
 
     valid_dts = wide_df["valid_time_utc"].to_list()
     if now_utc is not None and kalman_state:
@@ -556,6 +562,31 @@ def _assemble_hourly_forecast_dicts(
     return out
 
 
+def compute_exponential_recency_weights(
+    sub_df: pl.DataFrame,
+    *,
+    half_life_days: float = 420.0,
+    min_weight: float = 0.35,
+) -> np.ndarray:
+    """
+    Timestamp-aware exponential recency decay for multi-year (730-day) training sets.
+    Recent hours carry weight ~1.0 (anchoring to current NWP physics cycles), ~14-month-old
+    hours carry weight 0.50, and Year-2 tail extremes retain >= 0.35 weight.
+    """
+    n = sub_df.height
+    if n == 0:
+        return np.zeros(0, dtype=np.float64)
+    if "valid_time_utc" not in sub_df.columns:
+        return np.linspace(0.55, 1.0, n, dtype=np.float64)
+    epoch_s = sub_df["valid_time_utc"].dt.epoch("s").cast(pl.Float64).to_numpy()
+    if len(epoch_s) == 0 or np.all(np.isnan(epoch_s)):
+        return np.linspace(0.55, 1.0, n, dtype=np.float64)
+    max_s = float(np.nanmax(epoch_s))
+    age_days = np.maximum(0.0, (max_s - np.nan_to_num(epoch_s, nan=max_s)) / 86400.0)
+    weights = np.power(0.5, age_days / max(half_life_days, 1.0))
+    return np.clip(weights, min_weight, 1.0).astype(np.float64)
+
+
 def train_and_gate_mos_model(
     *,
     location_id: int,
@@ -596,8 +627,8 @@ def train_and_gate_mos_model(
             else np.zeros(len(X_all), dtype=bool)
         )
 
-        # Gentle exponential recency weighting (recent 6 months weighted 1.0 -> older 0.55)
-        recency_w = np.linspace(0.55, 1.0, len(X_all), dtype=np.float64)
+        # Timestamp-aware exponential recency weighting (~420d half-life across 2-year window)
+        recency_w = compute_exponential_recency_weights(sub_df)
         precip_w = np.where(has_user, recency_w * 3.0, recency_w)
 
         meso_mask = aux_all["lead_h"] <= 48.0

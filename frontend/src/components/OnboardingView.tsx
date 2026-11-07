@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Compass, Cpu, Loader2, MapPin, Navigation, Radar, Search, Sparkles } from 'lucide-react';
+import { Compass, Cpu, Home, Loader2, MapPin, Navigation, Radar, Search, Sparkles } from 'lucide-react';
 import { api } from '../api';
 import type { GeoSearchItem, PinnedLocation } from '../types';
 
@@ -13,6 +13,7 @@ export const OnboardingView: React.FC<OnboardingViewProps> = ({
   onEphemeralSelect,
 }) => {
   const [query, setQuery] = useState('');
+  const [nickname, setNickname] = useState('');
   const [results, setResults] = useState<GeoSearchItem[]>([]);
   const [searching, setSearching] = useState(false);
   const [busyAction, setBusyAction] = useState<string | null>(null);
@@ -27,7 +28,9 @@ export const OnboardingView: React.FC<OnboardingViewProps> = ({
       const res = await api.searchLocations(query.trim());
       setResults(res.results);
       if (res.results.length === 0) {
-        setError('No matching locations found. Try a city name or 5-digit ZIP code.');
+        setError(
+          'No matching locations found. Try a street address, lat/lon (e.g., 35.222, -97.439), ZIP, or city.'
+        );
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Search failed');
@@ -40,9 +43,13 @@ export const OnboardingView: React.FC<OnboardingViewProps> = ({
     setBusyAction(`pin:${item.lat}:${item.lon}`);
     setError(null);
     try {
+      const cleanNick = nickname.trim();
       const res = await api.pinLocation({
         name: item.name,
+        custom_name: cleanNick || undefined,
+        address_label: item.display_address || item.name,
         admin1: item.admin1,
+        country: item.country,
         lat: item.lat,
         lon: item.lon,
         elevation_m: item.elevation_m,
@@ -67,7 +74,11 @@ export const OnboardingView: React.FC<OnboardingViewProps> = ({
         const { latitude, longitude } = pos.coords;
         try {
           if (pinDirectly) {
-            const res = await api.pinLocation({ lat: latitude, lon: longitude });
+            const res = await api.pinLocation({
+              lat: latitude,
+              lon: longitude,
+              custom_name: nickname.trim() || undefined,
+            });
             onPinned(res.location);
           } else {
             onEphemeralSelect(latitude, longitude);
@@ -117,7 +128,7 @@ export const OnboardingView: React.FC<OnboardingViewProps> = ({
                 type="text"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search US city or ZIP (e.g., Moore, 73160)..."
+                placeholder="Street address, lat/lon, ZIP, or city (e.g., 123 Main St, Norman OK)..."
                 className="w-full pl-10 pr-4 py-3 rounded-xl bg-slate-900/90 border border-slate-700/80 text-base sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400 transition"
                 autoFocus
               />
@@ -130,6 +141,17 @@ export const OnboardingView: React.FC<OnboardingViewProps> = ({
               {searching ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Search'}
             </button>
           </form>
+
+          <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-900/60 border border-slate-800/80">
+            <Home className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+            <input
+              type="text"
+              value={nickname}
+              onChange={(e) => setNickname(e.target.value)}
+              placeholder='Optional label when pinning (e.g., "Home", "Garage", "Aruba Resort")'
+              className="w-full bg-transparent text-base sm:text-xs text-slate-200 placeholder-slate-500 focus:outline-none"
+            />
+          </div>
 
           <div className="flex flex-wrap items-center gap-2.5 pt-1">
             <button
@@ -176,15 +198,28 @@ export const OnboardingView: React.FC<OnboardingViewProps> = ({
                     key={`${item.name}-${item.lat}-${item.lon}`}
                     className="p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-slate-900/60 transition"
                   >
-                    <div className="flex items-start gap-2.5">
+                    <div className="flex items-start gap-2.5 min-w-0">
                       <MapPin className="w-4 h-4 text-cyan-400 mt-0.5 shrink-0" />
-                      <div>
-                        <div className="text-sm font-semibold text-white">
-                          {item.name}
-                          {item.admin1 ? `, ${item.admin1}` : ''}
+                      <div className="min-w-0">
+                        <div className="text-sm font-semibold text-white flex flex-wrap items-center gap-1.5">
+                          <span>
+                            {item.name}
+                            {item.admin1 && !item.name.includes(item.admin1) ? `, ${item.admin1}` : ''}
+                            {item.country && item.country !== 'US' ? ` (${item.country})` : ''}
+                          </span>
+                          {item.result_type === 'address' && (
+                            <span className="px-1.5 py-0.2 rounded bg-cyan-500/20 text-cyan-300 text-[10px] font-semibold">
+                              Exact Address
+                            </span>
+                          )}
                         </div>
+                        {item.display_address && item.display_address !== item.name && (
+                          <div className="text-[11px] text-slate-300/90 truncate max-w-md">
+                            {item.display_address}
+                          </div>
+                        )}
                         <div className="text-xs text-slate-400">
-                          {item.lat.toFixed(3)}°, {item.lon.toFixed(3)}° • Elev{' '}
+                          {item.lat.toFixed(4)}°, {item.lon.toFixed(4)}° • Elev{' '}
                           {Math.round(item.elevation_m * 3.28084)} ft
                         </div>
                       </div>

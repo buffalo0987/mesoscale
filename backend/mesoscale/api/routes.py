@@ -18,12 +18,22 @@ router = APIRouter(prefix="/api")
 
 class PinLocationRequest(BaseModel):
     name: str | None = None
+    custom_name: str | None = None
+    address_label: str | None = None
     admin1: str | None = None
+    country: str | None = None
     lat: float = Field(..., ge=-90.0, le=90.0)
     lon: float = Field(..., ge=-180.0, le=180.0)
     elevation_m: float | None = None
     timezone: str | None = None
+    alerts_enabled: bool = True
     trigger_backfill: bool = True
+
+
+class UpdateLocationRequest(BaseModel):
+    name: str | None = None
+    address_label: str | None = None
+    alerts_enabled: bool | None = None
 
 
 class PrecipCheckinRequest(BaseModel):
@@ -91,11 +101,22 @@ async def get_bootstrap(request: Request) -> dict[str, Any]:
 
 @router.get("/locations/search")
 async def search_locations(
-    request: Request, q: str = Query(..., min_length=2, max_length=100)
+    request: Request, q: str = Query(..., min_length=2, max_length=180)
 ) -> dict[str, Any]:
     eng = _engine(request)
     results = await eng.nws.geocode_search(q)
     return {"results": [r.to_dict() for r in results]}
+
+
+@router.get("/locations/reverse")
+async def reverse_geocode_point(
+    request: Request,
+    lat: float = Query(..., ge=-90.0, le=90.0),
+    lon: float = Query(..., ge=-180.0, le=180.0),
+) -> dict[str, Any]:
+    eng = _engine(request)
+    meta = await eng.nws.reverse_point_metadata(lat, lon)
+    return {"result": meta.to_dict()}
 
 
 @router.get("/ephemeral/forecast")
@@ -114,14 +135,36 @@ async def pin_location(request: Request, body: PinLocationRequest) -> dict[str, 
     eng = _engine(request)
     loc = await eng.pin_new_location(
         name=body.name,
+        custom_name=body.custom_name,
+        address_label=body.address_label,
         admin1=body.admin1,
+        country=body.country,
         lat=body.lat,
         lon=body.lon,
         elevation_m=body.elevation_m,
         timezone_name=body.timezone,
+        alerts_enabled=body.alerts_enabled,
         trigger_backfill=body.trigger_backfill,
     )
     return {"location": loc}
+
+
+@router.patch("/locations/{location_id}")
+async def update_pinned_location(
+    request: Request, location_id: int, body: UpdateLocationRequest
+) -> dict[str, Any]:
+    eng = _engine(request)
+    loc = await eng.app_store.get_location(location_id)
+    if not loc:
+        raise HTTPException(status_code=404, detail="Pinned location not found")
+    await eng.app_store.update_location_status(
+        location_id,
+        name=body.name.strip() if body.name and body.name.strip() else None,
+        address_label=body.address_label if body.address_label is not None else None,
+        alerts_enabled=body.alerts_enabled,
+    )
+    updated = await eng.app_store.get_location(location_id)
+    return {"location": updated}
 
 
 @router.get("/locations")
@@ -183,6 +226,7 @@ async def delete_pinned_location(request: Request, location_id: int) -> dict[str
     if not existed:
         raise HTTPException(status_code=404, detail="Pinned location not found")
     await eng.telemetry.delete_location_telemetry(location_id)
+    eng.remove_all_location_models(location_id)
     return {"deleted": True}
 
 
@@ -256,12 +300,16 @@ async def get_map_overlay(
     - IEM NEXRAD 5-min Web Mercator frame descriptors (past 50m -> live)
     """
     eng = _engine(request)
-    meso_vecs, asos_vecs, alerts, spc_d1, spc_d2 = await asyncio.gather(
-        eng.mesonet.fetch_nearby_station_vectors(lat, lon, radius_km=95.0),
-        eng.nws.fetch_nearby_asos_vectors(lat, lon, limit=4),
-        eng.nws.fetch_active_alerts(lat, lon),
-        eng.spc.get_day_geojson(1),
-        eng.spc.get_day_geojson(2),
+    meso_vecs, asos_vecs, alerts, spc_d1, spc_d2, spc_d1_hail, hail_geojson = (
+        await asyncio.gather(
+            eng.mesonet.fetch_nearby_station_vectors(lat, lon, radius_km=95.0),
+            eng.nws.fetch_nearby_asos_vectors(lat, lon, limit=4),
+            eng.nws.fetch_active_alerts(lat, lon),
+            eng.spc.get_day_geojson(1),
+            eng.spc.get_day_geojson(2),
+            eng.spc.get_day1_hail_geojson(),
+            eng.hail.get_hail_overlay_geojson(lat, lon, radius_km=180.0),
+        )
     )
 
     station_features: list[dict[str, Any]] = []
@@ -324,8 +372,10 @@ async def get_map_overlay(
     return {
         "stations_geojson": {"type": "FeatureCollection", "features": station_features},
         "alerts_geojson": {"type": "FeatureCollection", "features": alert_features},
+        "hail_cells_geojson": hail_geojson,
         "spc_day1_geojson": spc_d1,
         "spc_day2_geojson": spc_d2,
+        "spc_day1_hail_geojson": spc_d1_hail,
         "ring_geojson": ring_geojson_feature_collection(lat, lon, eng.settings.ring_radius_km),
         "radar_frames": radar_frames,
         "mrms_tile_url": "https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/q2-hsr-900913/{z}/{x}/{y}.png",

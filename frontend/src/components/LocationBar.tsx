@@ -1,6 +1,9 @@
 import React, { useState } from 'react';
 import {
+  Bell,
+  BellOff,
   Cpu,
+  Home,
   Loader2,
   MapPin,
   Navigation,
@@ -23,6 +26,7 @@ interface LocationBarProps {
   onSelectEphemeral: (lat: number, lon: number, name?: string) => void;
   onPinnedNew: (loc: PinnedLocation) => void;
   onDeletePinned: (id: number) => void;
+  onLocationUpdated: () => void;
   onToggleUnits: () => void;
   onOpenSettings: () => void;
 }
@@ -36,11 +40,13 @@ export const LocationBar: React.FC<LocationBarProps> = ({
   onSelectEphemeral,
   onPinnedNew,
   onDeletePinned,
+  onLocationUpdated,
   onToggleUnits,
   onOpenSettings,
 }) => {
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState('');
+  const [nickname, setNickname] = useState('');
   const [results, setResults] = useState<GeoSearchItem[]>([]);
   const [busy, setBusy] = useState(false);
 
@@ -98,17 +104,41 @@ export const LocationBar: React.FC<LocationBarProps> = ({
                     </span>
                   ) : null}
                   {isActive && pinnedLocations.length > 0 && (
-                    <button
-                      type="button"
-                      title="Remove pinned location"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onDeletePinned(loc.id);
-                      }}
-                      className="opacity-60 hover:opacity-100 hover:text-rose-400 ml-0.5 cursor-pointer"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                    </button>
+                    <>
+                      <button
+                        type="button"
+                        title={
+                          loc.alerts_enabled !== false
+                            ? 'Push & Hail alerts active for this location (tap to mute)'
+                            : 'Push & Hail alerts muted for this location (tap to enable)'
+                        }
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          await api.updateLocation(loc.id, {
+                            alerts_enabled: loc.alerts_enabled === false,
+                          });
+                          onLocationUpdated();
+                        }}
+                        className="opacity-70 hover:opacity-100 ml-0.5 cursor-pointer"
+                      >
+                        {loc.alerts_enabled !== false ? (
+                          <Bell className="w-3 h-3 text-cyan-300" />
+                        ) : (
+                          <BellOff className="w-3 h-3 text-slate-500" />
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        title="Remove pinned location"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onDeletePinned(loc.id);
+                        }}
+                        className="opacity-60 hover:opacity-100 hover:text-rose-400 ml-0.5 cursor-pointer"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </>
                   )}
                 </div>
               );
@@ -171,7 +201,7 @@ export const LocationBar: React.FC<LocationBarProps> = ({
                   type="text"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Search city or ZIP..."
+                  placeholder="Street address, lat/lon, ZIP, or city (US or global e.g. Aruba)..."
                   className="w-full pl-9 pr-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-base sm:text-sm text-white focus:outline-none focus:border-cyan-400"
                   autoFocus
                 />
@@ -192,6 +222,17 @@ export const LocationBar: React.FC<LocationBarProps> = ({
               </button>
             </form>
 
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-900/70 border border-slate-800">
+              <Home className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
+              <input
+                type="text"
+                value={nickname}
+                onChange={(e) => setNickname(e.target.value)}
+                placeholder='Optional pin nickname (e.g., "Home", "Parents", "Aruba")'
+                className="w-full bg-transparent text-base sm:text-xs text-slate-200 placeholder-slate-500 focus:outline-none"
+              />
+            </div>
+
             {results.length > 0 && (
               <div className="divide-y divide-slate-800/80 rounded-xl border border-slate-800 bg-slate-900/60 max-h-64 overflow-y-auto">
                 {results.map((r) => (
@@ -199,12 +240,28 @@ export const LocationBar: React.FC<LocationBarProps> = ({
                     key={`${r.name}-${r.lat}-${r.lon}`}
                     className="p-2.5 px-3 sm:px-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs"
                   >
-                    <div className="flex items-center gap-2 min-w-0">
-                      <MapPin className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-                      <span className="font-medium text-white truncate">
-                        {r.name}
-                        {r.admin1 ? `, ${r.admin1}` : ''}
-                      </span>
+                    <div className="flex items-start gap-2 min-w-0">
+                      <MapPin className="w-3.5 h-3.5 text-cyan-400 mt-0.5 shrink-0" />
+                      <div className="min-w-0">
+                        <div className="font-medium text-white truncate flex items-center gap-1.5">
+                          <span className="truncate">
+                            {r.name}
+                            {r.admin1 && !r.name.includes(r.admin1) ? `, ${r.admin1}` : ''}
+                            {r.country && r.country !== 'US' ? ` (${r.country})` : ''}
+                          </span>
+                          {r.result_type === 'address' && (
+                            <span className="px-1.5 py-0.2 rounded bg-cyan-500/20 text-cyan-300 text-[10px] font-semibold shrink-0">
+                              Address
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[11px] text-slate-400 truncate">
+                          {r.display_address && r.display_address !== r.name
+                            ? `${r.display_address} • `
+                            : ''}
+                          {r.lat.toFixed(4)}°, {r.lon.toFixed(4)}°
+                        </div>
+                      </div>
                     </div>
                     <div className="flex items-center justify-end gap-2 shrink-0">
                       <button
@@ -220,14 +277,19 @@ export const LocationBar: React.FC<LocationBarProps> = ({
                       <button
                         type="button"
                         onClick={async () => {
+                          const cleanNick = nickname.trim();
                           const pinned = await api.pinLocation({
                             name: r.name,
+                            custom_name: cleanNick || undefined,
+                            address_label: r.display_address || r.name,
                             admin1: r.admin1,
+                            country: r.country,
                             lat: r.lat,
                             lon: r.lon,
                             elevation_m: r.elevation_m,
                             timezone: r.timezone,
                           });
+                          setNickname('');
                           onPinnedNew(pinned.location);
                           setSearchOpen(false);
                         }}

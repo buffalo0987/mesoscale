@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Bell, CheckCircle2, Loader2, Radio, ShieldAlert, X } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Bell, Car, CheckCircle2, Loader2, Radio, ShieldAlert, X } from 'lucide-react';
 import { api } from '../api';
 import type { NotificationPrefs, PwsConfig } from '../types';
 import { urlBase64ToUint8Array } from '../units';
@@ -21,7 +21,13 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
   onClose,
   onUpdated,
 }) => {
-  const [prefs, setPrefs] = useState<NotificationPrefs>(initialNotifPrefs);
+  const [prefs, setPrefs] = useState<NotificationPrefs>({
+    hail_alerts: true,
+    hail_min_size_in: 0.5,
+    hail_lead_minutes: 45,
+    hail_bypass_quiet_hours: true,
+    ...initialNotifPrefs,
+  });
   const [pws, setPws] = useState<PwsConfig>({
     ...initialPwsConfig,
     api_key: '',
@@ -29,6 +35,16 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
   });
   const [pushStatus, setPushStatus] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setPrefs({
+      hail_alerts: true,
+      hail_min_size_in: 0.5,
+      hail_lead_minutes: 45,
+      hail_bypass_quiet_hours: true,
+      ...initialNotifPrefs,
+    });
+  }, [initialNotifPrefs, open]);
 
   if (!open) return null;
 
@@ -196,6 +212,82 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
               </div>
             </div>
 
+            {/* Garage Hail Shield (2-Min NEXRAD + NWS Watchdog) */}
+            <div className="pt-3 border-t border-slate-800/80 space-y-2.5">
+              <label className="flex items-center justify-between">
+                <span className="font-bold text-slate-100 flex items-center gap-1.5">
+                  <Car className="w-4 h-4 text-fuchsia-400 shrink-0" />
+                  Garage Hail Shield (2-Min NEXRAD Watchdog)
+                </span>
+                <input
+                  type="checkbox"
+                  checked={prefs.hail_alerts !== false}
+                  onChange={(e) => setPrefs({ ...prefs, hail_alerts: e.target.checked })}
+                  className="accent-fuchsia-400"
+                />
+              </label>
+              <p className="text-[11px] text-slate-400 leading-relaxed">
+                Polls live WSR-88D NEXRAD Level-III storm cell hail attributes + NWS warnings every 2 minutes and alerts you when a hail core enters your 18° driveway arrival cone.
+              </p>
+
+              {prefs.hail_alerts !== false && (
+                <div className="p-3 rounded-xl bg-slate-950/75 border border-fuchsia-500/25 space-y-2.5">
+                  <div>
+                    <span className="text-[11px] text-slate-300 block mb-1">
+                      Minimum Hail Size Trigger
+                    </span>
+                    <select
+                      value={String(prefs.hail_min_size_in ?? 0.5)}
+                      onChange={(e) =>
+                        setPrefs({ ...prefs, hail_min_size_in: Number(e.target.value) })
+                      }
+                      className="w-full px-2.5 py-2 rounded-lg bg-slate-900 border border-slate-700 text-base sm:text-xs text-white"
+                    >
+                      <option value="0.25">0.25&quot; (Pea — Any Radar Hail)</option>
+                      <option value="0.5">0.50&quot; (Marble — Recommended Truck Shield)</option>
+                      <option value="0.75">0.75&quot; (Penny)</option>
+                      <option value="1">1.00&quot; (Quarter — NWS Severe Criteria)</option>
+                      <option value="1.75">1.75&quot; (Golf Ball — Major Damage)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <div className="flex justify-between text-slate-300 mb-1">
+                      <span>Driveway Arrival Lead Window</span>
+                      <span className="font-mono text-fuchsia-300">
+                        ≤ {prefs.hail_lead_minutes ?? 45} min ETA
+                      </span>
+                    </div>
+                    <input
+                      type="range"
+                      min={20}
+                      max={60}
+                      step={5}
+                      value={prefs.hail_lead_minutes ?? 45}
+                      onChange={(e) =>
+                        setPrefs({ ...prefs, hail_lead_minutes: Number(e.target.value) })
+                      }
+                      className="w-full accent-fuchsia-400"
+                    />
+                  </div>
+
+                  <label className="flex items-center justify-between pt-0.5">
+                    <span className="text-slate-200">
+                      Bypass Quiet Hours for Approaching Hail
+                    </span>
+                    <input
+                      type="checkbox"
+                      checked={prefs.hail_bypass_quiet_hours !== false}
+                      onChange={(e) =>
+                        setPrefs({ ...prefs, hail_bypass_quiet_hours: e.target.checked })
+                      }
+                      className="accent-fuchsia-400"
+                    />
+                  </label>
+                </div>
+              )}
+            </div>
+
             {/* Quiet Hours with Tornado Life-Safety Bypass */}
             <div className="pt-3 border-t border-slate-800/80 space-y-2">
               <label className="flex items-center justify-between">
@@ -232,7 +324,7 @@ export const SettingsDrawer: React.FC<SettingsDrawerProps> = ({
               <div className="p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-200 text-[11px] flex items-start gap-2">
                 <ShieldAlert className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
                 <span>
-                  <b>Life-Safety Override:</b> Tornado Warnings & Extreme Severe Warnings automatically bypass Quiet Hours 24/7.
+                  <b>Life-Safety &amp; Garage Override:</b> Tornado Warnings, Extreme Severe Warnings, and (when enabled) Garage Hail Shield alerts bypass Quiet Hours 24/7.
                 </span>
               </div>
             </div>

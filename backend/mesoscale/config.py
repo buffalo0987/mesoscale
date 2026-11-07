@@ -22,6 +22,8 @@ class Settings(BaseSettings):
 
     ring_radius_km: float = 8.0
     backfill_days: int = 365
+    retention_days: int = 730
+    thin_hourly_runs_after_days: int = 90
     enable_scheduler: bool = True
     open_meteo_timeout_s: float = 25.0
 

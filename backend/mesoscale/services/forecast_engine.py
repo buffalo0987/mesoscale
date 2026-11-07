@@ -28,6 +28,7 @@ from mesoscale.ml.mos_trainer import (
 )
 from mesoscale.ml.thermodynamics import apparent_temperature_c, wet_bulb_celsius
 from mesoscale.providers.base import StationMeta
+from mesoscale.providers.hail_tracker import HailTrackerClient
 from mesoscale.providers.nws_iem import NwsIemClient
 from mesoscale.providers.ok_mesonet import (
     OklahomaMesonetClient,
@@ -41,6 +42,7 @@ from mesoscale.providers.station_blender import (
     discover_ground_truth_stations,
     rollup_station_observations_to_hourly,
 )
+from mesoscale.providers.subseasonal import SubseasonalClient
 from mesoscale.services.push_service import WebPushService
 
 
@@ -116,6 +118,8 @@ class ForecastEngineService:
         self.mesonet = OklahomaMesonetClient()
         self.nws = NwsIemClient(user_agent=settings.nws_user_agent)
         self.spc = SpcOutlookClient()
+        self.hail = HailTrackerClient()
+        self.subseasonal = SubseasonalClient()
         self.pws = PersonalWeatherStationClient()
 
         self._loaded_artifacts: dict[int, tuple[int, TrainedMosArtifact]] = {}
@@ -150,25 +154,42 @@ class ForecastEngineService:
         lon: float,
         elevation_m: float | None = None,
         timezone_name: str | None = None,
+        country: str | None = None,
+        custom_name: str | None = None,
+        address_label: str | None = None,
+        alerts_enabled: bool = True,
         trigger_backfill: bool = True,
     ) -> dict[str, Any]:
-        if not name or elevation_m is None or not timezone_name:
+        meta = None
+        if not name or elevation_m is None or not timezone_name or not country:
             meta = await self.nws.reverse_point_metadata(lat, lon)
             name = name or meta.name
             admin1 = admin1 if admin1 is not None else meta.admin1
             elevation_m = elevation_m if elevation_m is not None else meta.elevation_m
             timezone_name = timezone_name or meta.timezone
+            country = country or meta.country
+
+        clean_custom = (custom_name or "").strip()
+        final_name = clean_custom or (name or "").strip() or f"{lat:.4f}, {lon:.4f}"
+        final_addr = (address_label or "").strip()
+        if not final_addr:
+            if clean_custom and name and name.strip() != clean_custom:
+                final_addr = name.strip()
+            elif meta and meta.display_address:
+                final_addr = meta.display_address
 
         stations = await discover_ground_truth_stations(lat, lon, self.mesonet, self.nws)
         loc = await self.app_store.create_location(
-            name=name,
+            name=final_name,
+            address_label=final_addr,
             admin1=admin1 or "",
-            country="US",
+            country=(country or "US").upper(),
             lat=lat,
             lon=lon,
             elevation_m=float(elevation_m),
             timezone_name=timezone_name,
             stations=[s.to_dict() for s in stations],
+            alerts_enabled=alerts_enabled,
         )
         loc_id = int(loc["id"])
 
@@ -317,8 +338,30 @@ class ForecastEngineService:
             )
             return {"ok": False, "error": str(exc)}
 
+    def prune_old_model_files(self, location_id: int, keep_min_version: int) -> int:
+        """Delete superseded `.joblib` artifacts so nightly retrains never bloat disk over 2+ years."""
+        removed = 0
+        if not self.settings.models_dir.exists():
+            return 0
+        prefix = f"location_{location_id}_v"
+        for p in self.settings.models_dir.glob(f"{prefix}*.joblib"):
+            ver_part = p.stem[len(prefix) :]
+            if ver_part.isdigit() and int(ver_part) < keep_min_version:
+                try:
+                    p.unlink(missing_ok=True)
+                    removed += 1
+                except OSError:
+                    continue
+        return removed
+
+    def remove_all_location_models(self, location_id: int) -> None:
+        self._loaded_artifacts.pop(location_id, None)
+        self.prune_old_model_files(location_id, keep_min_version=10**9)
+
     async def retrain_location_model(self, location_id: int) -> dict[str, Any]:
-        train_df = await self.telemetry.build_training_pairs(location_id)
+        train_df = await self.telemetry.build_training_pairs(
+            location_id, retention_days=self.settings.retention_days
+        )
         existing_rec = await self.app_store.get_model_record(location_id)
         existing_ver = int(existing_rec["version"]) if existing_rec else 0
         existing_path = str(existing_rec["artifact_path"]) if existing_rec else None
@@ -341,6 +384,10 @@ class ForecastEngineService:
                 metrics=report,
             )
             await self.app_store.update_location_status(location_id, model_status="trained")
+            # Retain active Champion (`version`) + 1 prior rollback backup (`version - 1`)
+            await asyncio.to_thread(
+                self.prune_old_model_files, location_id, max(1, artifact.version - 1)
+            )
         return report
 
     # ── Live Multi-Model + 5-Min Observation Refresh & Online Learning ────
@@ -567,16 +614,67 @@ class ForecastEngineService:
             )
             await self.telemetry.upsert_ensemble_predictions(ens_df)
 
-            alerts = await self.nws.fetch_active_alerts(float(loc["lat"]), float(loc["lon"]))
+            lat_f, lon_f = float(loc["lat"]), float(loc["lon"])
+            alerts, spc_sum, notif_prefs = await asyncio.gather(
+                self.nws.fetch_active_alerts(lat_f, lon_f),
+                self.spc.get_outlook_summary_for_point(lat_f, lon_f),
+                self.app_store.get_notification_prefs(),
+            )
+            hail_risk = await self.hail.get_hail_summary_for_point(
+                lat=lat_f,
+                lon=lon_f,
+                alerts=alerts,
+                spc_hail=spc_sum.get("day1_hail"),
+                min_hail_in=float(notif_prefs.get("hail_min_size_in", 0.50)),
+                lead_window_minutes=int(notif_prefs.get("hail_lead_minutes", 45)),
+            )
             await self.push.evaluate_and_notify_location(
                 location=loc,
                 alerts=alerts,
                 hourly_forecast=hourly,
+                hail_risk=hail_risk,
                 prev_day_p50_map=prev_p50_map,
                 now_utc=now_utc,
             )
 
         await self.app_store.set_watermark("forecast_refresh", str(location_id), now_utc.isoformat())
+
+    async def check_rapid_alerts_for_location(self, location_id: int) -> dict[str, Any] | None:
+        """
+        Lightweight 2-minute Garage Hail & Tornado/Severe Warning watchdog.
+        Shares the 90-second cached national NEXRAD storm-cell feed across all pinned locations.
+        """
+        loc = await self.app_store.get_location(location_id)
+        if not loc or not loc.get("alerts_enabled", True):
+            return None
+        if str(loc.get("country") or "US").upper() != "US":
+            return None
+
+        prefs = await self.app_store.get_notification_prefs()
+        if not prefs.get("enabled", True):
+            return None
+
+        lat, lon = float(loc["lat"]), float(loc["lon"])
+        alerts, spc_sum = await asyncio.gather(
+            self.nws.fetch_active_alerts(lat, lon),
+            self.spc.get_outlook_summary_for_point(lat, lon),
+        )
+        hail_risk = await self.hail.get_hail_summary_for_point(
+            lat=lat,
+            lon=lon,
+            alerts=alerts,
+            spc_hail=spc_sum.get("day1_hail"),
+            min_hail_in=float(prefs.get("hail_min_size_in", 0.50)),
+            lead_window_minutes=int(prefs.get("hail_lead_minutes", 45)),
+        )
+        dispatched = await self.push.evaluate_and_notify_location(
+            location=loc,
+            alerts=alerts,
+            hourly_forecast=None,
+            hail_risk=hail_risk,
+            now_utc=datetime.now(UTC),
+        )
+        return {"hail_risk": hail_risk, "dispatched": dispatched}
 
     async def _compute_pinned_hourly(
         self, location_id: int, now_utc: datetime
@@ -656,14 +754,37 @@ class ForecastEngineService:
             }
 
         lat, lon = float(loc["lat"]), float(loc["lon"])
-        alerts, spc_summary, model_rec, checkins = await asyncio.gather(
+        tz_str = str(loc.get("timezone") or "America/Chicago")
+        country_str = str(loc.get("country") or "US")
+        alerts, spc_summary, model_rec, checkins, notif_prefs, obs_14d = await asyncio.gather(
             self.nws.fetch_active_alerts(lat, lon),
             self.spc.get_outlook_summary_for_point(lat, lon),
             self.app_store.get_model_record(location_id),
             self.app_store.list_precip_checkins(location_id, limit=5),
+            self.app_store.get_notification_prefs(),
+            self.telemetry.query_recent_blended_obs(location_id, hours=24 * 14),
+        )
+        hail_risk, subseasonal = await asyncio.gather(
+            self.hail.get_hail_summary_for_point(
+                lat=lat,
+                lon=lon,
+                alerts=alerts,
+                spc_hail=spc_summary.get("day1_hail"),
+                min_hail_in=float(notif_prefs.get("hail_min_size_in", 0.50)),
+                lead_window_minutes=int(notif_prefs.get("hail_lead_minutes", 45)),
+            ),
+            self.subseasonal.get_subseasonal_outlook(
+                lat=lat,
+                lon=lon,
+                tz_name=tz_str,
+                country=country_str,
+                recent_obs_df=obs_14d,
+            ),
         )
         alert_dicts = [a.to_dict() for a in alerts]
-        storm_winter = summarize_storm_winter_mode(hourly, spc_summary, alert_dicts)
+        storm_winter = summarize_storm_winter_mode(
+            hourly, spc_summary, alert_dicts, hail_risk=hail_risk
+        )
         kalman_state = (model_rec or {}).get("kalman_state") or {}
 
         return {
@@ -683,7 +804,9 @@ class ForecastEngineService:
             "current_observation": current_obs,
             "nowcast_15m": nowcast_15m,
             "hourly": hourly,
-            "daily": _build_daily_outlook(hourly, str(loc.get("timezone") or "America/Chicago")),
+            "daily": _build_daily_outlook(hourly, tz_str),
+            "subseasonal": subseasonal,
+            "hail_risk": hail_risk,
             "alerts": alert_dicts,
             "storm_winter": storm_winter,
             "recent_checkins": checkins,
@@ -778,12 +901,32 @@ class ForecastEngineService:
             for r in sub15_df.sort("valid_time_utc").head(16).to_dicts()
         ]
         alert_dicts = [a.to_dict() for a in alerts]
+        notif_prefs = await self.app_store.get_notification_prefs()
+        hail_risk, subseasonal = await asyncio.gather(
+            self.hail.get_hail_summary_for_point(
+                lat=lat,
+                lon=lon,
+                alerts=alerts,
+                spc_hail=spc_summary.get("day1_hail"),
+                min_hail_in=float(notif_prefs.get("hail_min_size_in", 0.50)),
+                lead_window_minutes=int(notif_prefs.get("hail_lead_minutes", 45)),
+            ),
+            self.subseasonal.get_subseasonal_outlook(
+                lat=lat,
+                lon=lon,
+                tz_name=meta.timezone,
+                country=meta.country,
+                recent_obs_df=None,
+            ),
+        )
 
         bundle = {
             "mode": "ephemeral_consensus",
             "location": {
                 "id": None,
                 "name": display_name,
+                "address_label": meta.display_address,
+                "alerts_enabled": False,
                 "admin1": meta.admin1,
                 "country": meta.country,
                 "lat": round(lat, 4),
@@ -796,7 +939,7 @@ class ForecastEngineService:
                 "model_status": "ephemeral_consensus",
                 "backfill_status": "not_pinned",
                 "backfill_progress": 0.0,
-                "backfill_message": "Instant 6-model consensus + live Kalman nowcast. Pin to train local AI.",
+                "backfill_message": "Instant multi-model consensus + live Kalman nowcast. Pin to train local AI.",
                 "kalman_bias_c": (kalman_state.get("x") or [0.0, 0.0])[0] if kalman_state else 0.0,
                 "kalman_trend_c_hr": (kalman_state.get("x") or [0.0, 0.0])[1] if kalman_state else 0.0,
             },
@@ -804,8 +947,12 @@ class ForecastEngineService:
             "nowcast_15m": nowcast_15m,
             "hourly": hourly,
             "daily": _build_daily_outlook(hourly, meta.timezone),
+            "subseasonal": subseasonal,
+            "hail_risk": hail_risk,
             "alerts": alert_dicts,
-            "storm_winter": summarize_storm_winter_mode(hourly, spc_summary, alert_dicts),
+            "storm_winter": summarize_storm_winter_mode(
+                hourly, spc_summary, alert_dicts, hail_risk=hail_risk
+            ),
             "recent_checkins": [],
         }
         self._ephemeral_cache[cache_key] = (now_mono, bundle)

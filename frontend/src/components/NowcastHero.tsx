@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import {
   AlertTriangle,
+  Car,
   CheckCircle2,
   CloudLightning,
   CloudRain,
@@ -9,7 +10,9 @@ import {
   Droplets,
   Gauge,
   Loader2,
+  MapPin,
   RefreshCw,
+  ShieldAlert,
   Snowflake,
   Sun,
   Wind,
@@ -85,7 +88,9 @@ export const NowcastHero: React.FC<NowcastHeroProps> = ({
     try {
       const res = await api.pinLocation({
         name: loc.name,
+        address_label: loc.address_label,
         admin1: loc.admin1,
+        country: loc.country,
         lat: loc.lat,
         lon: loc.lon,
         elevation_m: loc.elevation_m,
@@ -97,8 +102,80 @@ export const NowcastHero: React.FC<NowcastHeroProps> = ({
     }
   };
 
+  const hailRisk = bundle.hail_risk;
+  const showHailShieldBanner =
+    hailRisk && (hailRisk.status === 'imminent' || hailRisk.status === 'approaching');
+  const isInternational =
+    Boolean(loc.country) &&
+    loc.country !== 'United States' &&
+    loc.country !== 'US' &&
+    loc.country !== 'USA';
+  const elevText =
+    units === 'imperial'
+      ? `${Math.round((loc.elevation_m || 0) * 3.28084).toLocaleString()} ft`
+      : `${Math.round(loc.elevation_m || 0)} m`;
+
   return (
     <section className="space-y-4">
+      {/* Garage Hail Shield Banner (2-Minute NEXRAD + NWS Watchdog) */}
+      {showHailShieldBanner && hailRisk && (
+        <div
+          role="alert"
+          className={`rounded-2xl border p-4 sm:p-5 space-y-2.5 shadow-lg ${
+            hailRisk.status === 'imminent'
+              ? 'bg-gradient-to-r from-rose-950/90 via-fuchsia-950/80 to-slate-950 border-rose-500/70 text-rose-50'
+              : 'bg-gradient-to-r from-amber-950/85 via-orange-950/75 to-slate-950 border-amber-400/60 text-amber-50'
+          }`}
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <span
+                className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-extrabold uppercase tracking-wider border ${
+                  hailRisk.status === 'imminent'
+                    ? 'bg-rose-500/25 border-rose-400/60 text-rose-200'
+                    : 'bg-amber-500/25 border-amber-400/60 text-amber-200'
+                }`}
+              >
+                <ShieldAlert className="w-3.5 h-3.5 shrink-0" />
+                Garage Hail Shield · {hailRisk.status === 'imminent' ? 'Imminent' : 'Approaching'}
+              </span>
+              {hailRisk.eta_minutes !== null && (
+                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-mono font-bold bg-black/35 border border-white/15 text-white">
+                  ETA ~{hailRisk.eta_minutes} min
+                </span>
+              )}
+              {hailRisk.max_hail_in > 0 && (
+                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-semibold bg-fuchsia-500/20 border border-fuchsia-400/40 text-fuchsia-100">
+                  Max Hail: {hailRisk.hail_label}
+                </span>
+              )}
+            </div>
+            <span className="inline-flex items-center gap-1.5 text-xs font-bold text-white bg-black/30 px-2.5 py-1 rounded-lg border border-white/10">
+              <Car className="w-3.5 h-3.5 text-cyan-300 shrink-0" />
+              Move Vehicles Under Cover
+            </span>
+          </div>
+
+          <p className="text-xs sm:text-sm font-semibold text-white leading-snug">
+            {hailRisk.headline}
+          </p>
+
+          {hailRisk.approaching_cells.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5 pt-0.5 text-[11px]">
+              {hailRisk.approaching_cells.slice(0, 2).map((c) => (
+                <span
+                  key={c.cell_key}
+                  className="px-2 py-0.5 rounded-lg bg-black/30 border border-white/10 text-slate-200 font-mono"
+                >
+                  {c.cell_key} · {c.distance_mi.toFixed(0)} mi {c.bearing_from_target} ·{' '}
+                  {Math.round(c.speed_mph)} mph · POSH {c.posh_pct}%
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Severe NWS Alert Banners */}
       {bundle.alerts.map((alert) => (
         <details
@@ -178,7 +255,10 @@ export const NowcastHero: React.FC<NowcastHeroProps> = ({
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-xl sm:text-2xl font-bold text-white">
                 {loc.name}
-                {loc.admin1 ? `, ${loc.admin1}` : ''}
+                {loc.admin1 && loc.admin1 !== loc.name ? `, ${loc.admin1}` : ''}
+                {isInternational && loc.country && loc.country !== loc.name
+                  ? ` · ${loc.country}`
+                  : ''}
               </h2>
               <span
                 className={`px-2.5 py-0.5 rounded-full text-[10px] sm:text-[11px] font-semibold border ${
@@ -206,6 +286,20 @@ export const NowcastHero: React.FC<NowcastHeroProps> = ({
               >
                 <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin text-cyan-400' : ''}`} />
               </button>
+            </div>
+
+            <div className="text-[11px] text-slate-400 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+              <span className="inline-flex items-center gap-1 text-slate-300">
+                <MapPin className="w-3 h-3 text-cyan-400 shrink-0" />
+                {loc.address_label &&
+                loc.address_label.trim() &&
+                loc.address_label.trim() !== loc.name
+                  ? loc.address_label
+                  : 'Exact Rooftop Pin'}
+              </span>
+              <span className="font-mono text-slate-500">
+                ({loc.lat.toFixed(4)}°, {loc.lon.toFixed(4)}° · Elev {elevText})
+              </span>
             </div>
 
             <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
@@ -243,8 +337,11 @@ export const NowcastHero: React.FC<NowcastHeroProps> = ({
                     key={s.station_id}
                     className="px-1.5 sm:px-2 py-0.5 rounded bg-slate-900/90 border border-slate-800 text-slate-300"
                   >
-                    {s.station_id} ({s.source === 'ok_mesonet' ? 'OK Mesonet 5m' : 'ASOS'} ·{' '}
-                    {(s.distance_km * 0.621371).toFixed(1)} mi · {Math.round(s.blend_weight * 100)}%)
+                    {s.station_id} ({s.source === 'ok_mesonet' ? 'OK Mesonet 5m' : 'ASOS/METAR'} ·{' '}
+                    {units === 'imperial'
+                      ? `${(s.distance_km * 0.621371).toFixed(1)} mi`
+                      : `${s.distance_km.toFixed(1)} km`}{' '}
+                    · {Math.round(s.blend_weight * 100)}%)
                   </span>
                 ))}
                 {obs && (

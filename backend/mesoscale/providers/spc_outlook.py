@@ -45,6 +45,12 @@ SPC_URLS_BY_DAY: dict[int, tuple[str, ...]] = {
 }
 
 
+SPC_DAY1_HAIL_URLS: tuple[str, ...] = (
+    "https://www.spc.noaa.gov/products/outlook/day1otlk_hail.nolyr.geojson",
+    "https://mapservices.weather.noaa.gov/vector/rest/services/outlooks/SPC_wx_outlks/MapServer/5/query?where=1%3D1&outFields=DN,LABEL,LABEL2,ISSUE,EXPIRE,FILL,STROKE&f=geojson",
+)
+
+
 def _point_in_ring(lon: float, lat: float, ring: list[list[float]]) -> bool:
     inside = False
     n = len(ring)
@@ -108,12 +114,70 @@ def evaluate_point_spc_risk(geojson: dict[str, Any], lat: float, lon: float) -> 
     }
 
 
+def evaluate_point_spc_hail_risk(geojson: dict[str, Any], lat: float, lon: float) -> dict[str, Any]:
+    """Evaluate SPC Day 1 Probabilistic Hail % (5..60%) and Significant Hail (SIGN >= 2 in) at (lat, lon)."""
+    best_prob = 0
+    sig_hail = False
+    for feat in geojson.get("features") or []:
+        if not _point_in_geometry(lon, lat, feat.get("geometry")):
+            continue
+        props = feat.get("properties") or {}
+        label = str(props.get("LABEL") or "").strip().upper()
+        dn_raw = props.get("DN")
+        if label in ("SIGN", "CIG1", "CIG2", "CIG3"):
+            sig_hail = True
+            continue
+        for candidate in (dn_raw, label.rstrip("%")):
+            if candidate is None:
+                continue
+            try:
+                pct = int(float(str(candidate).strip()))
+                if 0 < pct <= 100:
+                    best_prob = max(best_prob, pct)
+            except ValueError:
+                continue
+
+    if best_prob == 0 and not sig_hail:
+        desc = "Low (<5%)"
+    elif sig_hail:
+        desc = f"{best_prob}% Prob • Hatched Significant Hail (≥2\")"
+    else:
+        desc = f"{best_prob}% Day 1 Hail Risk"
+    return {
+        "prob_pct": best_prob,
+        "sig_hail": sig_hail,
+        "label": desc,
+    }
+
+
 class SpcOutlookClient:
-    """Cached fetcher for NOAA SPC Day 1-3 Convective Outlook GeoJSON layers."""
+    """Cached fetcher for NOAA SPC Day 1-3 Convective & Day 1 Hail Outlook GeoJSON layers."""
 
     def __init__(self, ttl_seconds: float = 900.0) -> None:
         self.ttl_seconds = ttl_seconds
-        self._cache: dict[int, tuple[float, dict[str, Any]]] = {}
+        self._cache: dict[int | str, tuple[float, dict[str, Any]]] = {}
+
+    async def get_day1_hail_geojson(self) -> dict[str, Any]:
+        now = time.monotonic()
+        cached = self._cache.get("day1_hail")
+        if cached and (now - cached[0]) < self.ttl_seconds:
+            return cached[1]
+
+        async with httpx.AsyncClient(timeout=12.0, follow_redirects=True) as client:
+            for url in SPC_DAY1_HAIL_URLS:
+                try:
+                    resp = await client.get(url)
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        if isinstance(data, dict) and data.get("type") == "FeatureCollection":
+                            self._cache["day1_hail"] = (now, data)
+                            return data
+                except (httpx.HTTPError, ValueError):
+                    continue
+
+        empty = {"type": "FeatureCollection", "features": []}
+        self._cache["day1_hail"] = (now, empty)
+        return empty
 
     async def get_day_geojson(self, day: int = 1) -> dict[str, Any]:
         now = time.monotonic()
@@ -146,19 +210,22 @@ class SpcOutlookClient:
         return empty
 
     async def get_outlook_summary_for_point(self, lat: float, lon: float) -> dict[str, Any]:
-        d1, d2, d3 = await asyncio.gather(
+        d1, d2, d3, d1_hail = await asyncio.gather(
             self.get_day_geojson(1),
             self.get_day_geojson(2),
             self.get_day_geojson(3),
+            self.get_day1_hail_geojson(),
         )
         r1 = evaluate_point_spc_risk(d1, lat, lon)
         r2 = evaluate_point_spc_risk(d2, lat, lon)
         r3 = evaluate_point_spc_risk(d3, lat, lon)
+        h1 = evaluate_point_spc_hail_risk(d1_hail, lat, lon)
         max_rank = max(r1["rank"], r2["rank"], r3["rank"])
         return {
             "day1": r1,
             "day2": r2,
             "day3": r3,
-            "has_severe_risk": max_rank >= SPC_RISK_RANK["MRGL"],
-            "has_thunder_risk": max_rank >= SPC_RISK_RANK["TSTM"],
+            "day1_hail": h1,
+            "has_severe_risk": max_rank >= SPC_RISK_RANK["MRGL"] or h1["prob_pct"] >= 5,
+            "has_thunder_risk": max_rank >= SPC_RISK_RANK["TSTM"] or h1["prob_pct"] >= 5,
         }

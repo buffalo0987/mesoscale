@@ -1,9 +1,21 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import maplibregl from 'maplibre-gl';
-import { Layers, Pause, Play, Radar, Radio, ShieldAlert } from 'lucide-react';
+import {
+  Cpu,
+  Eye,
+  Layers,
+  Loader2,
+  MapPin,
+  Pause,
+  Play,
+  Radar,
+  Radio,
+  ShieldAlert,
+  X,
+} from 'lucide-react';
 import { api } from '../api';
-import type { UnitSystem } from '../types';
+import type { GeoSearchItem, PinnedLocation, UnitSystem } from '../types';
 import { degToCompass } from '../units';
 
 interface RadarMesonetMapProps {
@@ -11,6 +23,8 @@ interface RadarMesonetMapProps {
   lon: number;
   locationName: string;
   units: UnitSystem;
+  onSelectEphemeral?: (lat: number, lon: number, name?: string) => void;
+  onPinnedNew?: (loc: PinnedLocation) => void;
 }
 
 export const RadarMesonetMap: React.FC<RadarMesonetMapProps> = ({
@@ -18,25 +32,40 @@ export const RadarMesonetMap: React.FC<RadarMesonetMapProps> = ({
   lon,
   locationName,
   units,
+  onSelectEphemeral,
+  onPinnedNew,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const markersRef = useRef<maplibregl.Marker[]>([]);
+  const homeMarkerRef = useRef<maplibregl.Marker | null>(null);
+  const tappedMarkerRef = useRef<maplibregl.Marker | null>(null);
 
   const [playing, setPlaying] = useState(false);
   const [frameIdx, setFrameIdx] = useState(10); // 10 == Live (0m)
   const [radarProduct, setRadarProduct] = useState<'nexrad' | 'mrms'>('nexrad');
-  const [spcLayer, setSpcLayer] = useState<'none' | 'day1' | 'day2'>('day1');
+  const [spcLayer, setSpcLayer] = useState<'none' | 'day1' | 'day2' | 'hail'>('day1');
   const [showStations, setShowStations] = useState(true);
   const [mapReady, setMapReady] = useState(false);
+
+  // Tap-on-Map Rooftop Pinning state
+  const [tappedCoords, setTappedCoords] = useState<{ lat: number; lon: number } | null>(null);
+  const [tappedGeo, setTappedGeo] = useState<GeoSearchItem | null>(null);
+  const [resolvingTap, setResolvingTap] = useState(false);
+  const [tappedNickname, setTappedNickname] = useState('');
+  const [pinningTap, setPinningTap] = useState(false);
 
   const overlayQuery = useQuery({
     queryKey: ['map-overlay', lat.toFixed(3), lon.toFixed(3)],
     queryFn: () => api.getMapOverlay(lat, lon),
-    refetchInterval: 5 * 60 * 1000,
+    refetchInterval: 2 * 60 * 1000,
   });
 
   const frames = overlayQuery.data?.radar_frames ?? [];
+  const hailCoreCount =
+    overlayQuery.data?.hail_cells_geojson?.features.filter(
+      (f) => f.properties?.feature_kind === 'hail_core'
+    ).length ?? 0;
 
   // Initialize MapLibre GL map
   useEffect(() => {
@@ -52,19 +81,85 @@ export const RadarMesonetMap: React.FC<RadarMesonetMapProps> = ({
 
     map.addControl(new maplibregl.NavigationControl({ showCompass: true }), 'top-right');
 
+    // Exact active rooftop pin marker at center
+    const homeEl = document.createElement('div');
+    homeEl.className =
+      'w-3.5 h-3.5 rounded-full bg-cyan-400 border-2 border-slate-950 shadow-[0_0_10px_rgba(34,211,238,0.9)]';
+    homeEl.title = `${locationName} (${lat.toFixed(4)}°, ${lon.toFixed(4)}°)`;
+    homeMarkerRef.current = new maplibregl.Marker({ element: homeEl })
+      .setLngLat([lon, lat])
+      .addTo(map);
+
     map.on('load', () => {
       setMapReady(true);
+    });
+
+    // Tap anywhere on map to inspect / pin exact rooftop coordinates, or inspect a hail core
+    map.on('click', (e) => {
+      if (map.getLayer('hail-cores')) {
+        const hits = map.queryRenderedFeatures(e.point, { layers: ['hail-cores'] });
+        if (hits.length > 0) {
+          const hp = hits[0].properties || {};
+          const html = `
+            <div style="font-size:11px;line-height:1.45">
+              <div style="font-weight:700;color:#f472b6">NEXRAD Cell ${String(hp.cell_key || '')}</div>
+              <div>Est. Max Hail: <b>${String(hp.hail_label || '')}</b></div>
+              <div>POSH (Severe ≥1"): <b>${Number(hp.posh_pct || 0)}%</b> · POH: <b>${Number(hp.poh_pct || 0)}%</b></div>
+              <div>Storm Motion: <b>${Math.round(Number(hp.speed_mph || 0))} mph</b></div>
+            </div>
+          `;
+          new maplibregl.Popup({ offset: 10 })
+            .setLngLat(e.lngLat)
+            .setHTML(html)
+            .addTo(map);
+          return;
+        }
+      }
+
+      const clickLat = Number(e.lngLat.lat.toFixed(5));
+      const clickLon = Number(e.lngLat.lng.toFixed(5));
+      setTappedCoords({ lat: clickLat, lon: clickLon });
+      setTappedGeo(null);
+      setResolvingTap(true);
+
+      if (tappedMarkerRef.current) {
+        tappedMarkerRef.current.setLngLat([clickLon, clickLat]);
+      } else {
+        const pinEl = document.createElement('div');
+        pinEl.className =
+          'w-4 h-4 rounded-full bg-emerald-400 border-2 border-white shadow-[0_0_12px_rgba(52,211,153,0.95)]';
+        tappedMarkerRef.current = new maplibregl.Marker({ element: pinEl })
+          .setLngLat([clickLon, clickLat])
+          .addTo(map);
+      }
+
+      api
+        .reverseGeocode(clickLat, clickLon)
+        .then((res) => {
+          setTappedGeo(res.result);
+        })
+        .catch(() => {
+          setTappedGeo(null);
+        })
+        .finally(() => {
+          setResolvingTap(false);
+        });
     });
 
     mapRef.current = map;
     return () => {
       markersRef.current.forEach((m) => m.remove());
       markersRef.current = [];
+      homeMarkerRef.current?.remove();
+      homeMarkerRef.current = null;
+      tappedMarkerRef.current?.remove();
+      tappedMarkerRef.current = null;
+      setTappedCoords(null);
       setMapReady(false);
       map.remove();
       mapRef.current = null;
     };
-  }, [lat, lon]);
+  }, [lat, lon, locationName]);
 
   // Populate / update raster radar & GeoJSON vector layers once loaded
   useEffect(() => {
@@ -111,13 +206,15 @@ export const RadarMesonetMap: React.FC<RadarMesonetMapProps> = ({
       });
     }
 
-    // 3. SPC Convective Outlook GeoJSON
+    // 3. SPC Convective / Hail Outlook GeoJSON
     const spcData =
       spcLayer === 'day1'
         ? data.spc_day1_geojson
         : spcLayer === 'day2'
           ? data.spc_day2_geojson
-          : { type: 'FeatureCollection', features: [] };
+          : spcLayer === 'hail'
+            ? (data.spc_day1_hail_geojson ?? { type: 'FeatureCollection', features: [] })
+            : { type: 'FeatureCollection', features: [] };
 
     type MapGeoJsonData = Parameters<maplibregl.GeoJSONSource['setData']>[0];
 
@@ -134,7 +231,13 @@ export const RadarMesonetMap: React.FC<RadarMesonetMapProps> = ({
         type: 'fill',
         source: 'spc-src',
         paint: {
-          'fill-color': ['coalesce', ['get', 'fill'], '#f59e0b'],
+          'fill-color': [
+            'coalesce',
+            ['get', 'fill'],
+            ['get', 'FILL'],
+            ['get', 'mesoscale_color'],
+            '#f59e0b',
+          ],
           'fill-opacity': 0.16,
         },
       });
@@ -143,7 +246,13 @@ export const RadarMesonetMap: React.FC<RadarMesonetMapProps> = ({
         type: 'line',
         source: 'spc-src',
         paint: {
-          'line-color': ['coalesce', ['get', 'stroke'], '#fbbf24'],
+          'line-color': [
+            'coalesce',
+            ['get', 'stroke'],
+            ['get', 'STROKE'],
+            ['get', 'mesoscale_color'],
+            '#fbbf24',
+          ],
           'line-width': 2,
         },
       });
@@ -221,6 +330,46 @@ export const RadarMesonetMap: React.FC<RadarMesonetMapProps> = ({
         },
       });
     }
+
+    // 6. Live NEXRAD Level-III Hail Cores + 45-Minute Forward Track Vectors
+    const hailData = data.hail_cells_geojson ?? { type: 'FeatureCollection', features: [] };
+    const existingHail = map.getSource('hail-src') as maplibregl.GeoJSONSource | undefined;
+    if (existingHail) {
+      existingHail.setData(hailData as unknown as MapGeoJsonData);
+    } else {
+      map.addSource('hail-src', {
+        type: 'geojson',
+        data: hailData as unknown as MapGeoJsonData,
+      });
+      map.addLayer({
+        id: 'hail-tracks',
+        type: 'line',
+        source: 'hail-src',
+        filter: ['==', ['get', 'feature_kind'], 'hail_track'],
+        paint: {
+          'line-color': '#e879f9',
+          'line-width': 2.5,
+          'line-dasharray': [2, 2],
+        },
+      });
+      map.addLayer({
+        id: 'hail-cores',
+        type: 'circle',
+        source: 'hail-src',
+        filter: ['==', ['get', 'feature_kind'], 'hail_core'],
+        paint: {
+          'circle-radius': ['case', ['>=', ['to-number', ['get', 'hail_in']], 1.0], 7.5, 6],
+          'circle-color': [
+            'case',
+            ['>=', ['to-number', ['get', 'hail_in']], 1.0],
+            '#f43f5e',
+            '#d946ef',
+          ],
+          'circle-stroke-width': 2,
+          'circle-stroke-color': '#ffffff',
+        },
+      });
+    }
   }, [mapReady, overlayQuery.data, spcLayer, radarProduct, frameIdx]);
 
   // Smoothly toggle active radar frame opacity
@@ -291,12 +440,13 @@ export const RadarMesonetMap: React.FC<RadarMesonetMapProps> = ({
       el.innerHTML = `<span>${String(p.station_id)}</span><span class="text-white">${tempVal}</span>${
         windVal ? `<span class="text-slate-400 font-normal">${compass} ${windVal}</span>` : ''
       }`;
+      el.addEventListener('click', (ev) => ev.stopPropagation());
 
       const popupHtml = `
         <div style="font-size:11px;line-height:1.45">
           <div style="font-weight:700;color:#38bdf8">${String(p.name)} (${String(p.station_id)})</div>
           <div style="color:#94a3b8;font-size:10px;margin-bottom:4px">${
-            isMesonet ? 'Oklahoma Mesonet · 5-Min Research Tower' : 'NWS / FAA ASOS Automated Station'
+            isMesonet ? 'Oklahoma Mesonet · 5-Min Research Tower' : 'NWS / FAA / ICAO Automated Station'
           }</div>
           <div>Temp: <b>${p.temp_f}°F (${p.temp_c}°C)</b></div>
           <div>Wind: <b>${compass} ${p.wind_mph ?? 0} mph</b>${
@@ -314,6 +464,45 @@ export const RadarMesonetMap: React.FC<RadarMesonetMapProps> = ({
     }
   }, [mapReady, overlayQuery.data, showStations, units]);
 
+  const clearTappedPin = () => {
+    tappedMarkerRef.current?.remove();
+    tappedMarkerRef.current = null;
+    setTappedCoords(null);
+    setTappedGeo(null);
+    setTappedNickname('');
+  };
+
+  const handlePinTappedRooftop = async () => {
+    if (!tappedCoords || !onPinnedNew) return;
+    setPinningTap(true);
+    try {
+      const nick = tappedNickname.trim();
+      const res = await api.pinLocation({
+        name: tappedGeo?.name || `${tappedCoords.lat.toFixed(4)}, ${tappedCoords.lon.toFixed(4)}`,
+        custom_name: nick || undefined,
+        address_label: tappedGeo?.display_address || tappedGeo?.name,
+        admin1: tappedGeo?.admin1,
+        country: tappedGeo?.country,
+        lat: tappedCoords.lat,
+        lon: tappedCoords.lon,
+        elevation_m: tappedGeo?.elevation_m,
+        timezone: tappedGeo?.timezone,
+      });
+      clearTappedPin();
+      onPinnedNew(res.location);
+    } finally {
+      setPinningTap(false);
+    }
+  };
+
+  const handleInstantTappedForecast = () => {
+    if (!tappedCoords || !onSelectEphemeral) return;
+    const nick = tappedNickname.trim();
+    const label = nick || tappedGeo?.name || `${tappedCoords.lat.toFixed(4)}, ${tappedCoords.lon.toFixed(4)}`;
+    clearTappedPin();
+    onSelectEphemeral(tappedCoords.lat, tappedCoords.lon, label);
+  };
+
   const currentFrame = frames[frameIdx];
 
   return (
@@ -322,10 +511,10 @@ export const RadarMesonetMap: React.FC<RadarMesonetMapProps> = ({
         <div>
           <h3 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
             <Radar className="w-4 h-4 text-cyan-400 shrink-0" />
-            Live NEXRAD / MRMS Radar & 5-Min Mesonet Towers
+            Live NEXRAD / MRMS Radar, Hail Tracks &amp; Rooftop Pinning
           </h3>
           <p className="text-[11px] sm:text-xs text-slate-400 mt-0.5">
-            Centered on {locationName} (dashed cyan ring = 8 km 5-point convective sampling perimeter).
+            Centered on {locationName} (8 km convective ring · tap anywhere on the map to drop an exact rooftop pin).
           </p>
         </div>
 
@@ -355,17 +544,31 @@ export const RadarMesonetMap: React.FC<RadarMesonetMapProps> = ({
           </div>
 
           <div className="inline-flex rounded-xl bg-slate-900 border border-slate-800 p-0.5 shrink-0">
-            {(['none', 'day1', 'day2'] as const).map((mode) => (
+            {(['none', 'day1', 'day2', 'hail'] as const).map((mode) => (
               <button
                 key={mode}
                 type="button"
                 onClick={() => setSpcLayer(mode)}
                 className={`px-2.5 py-1 rounded-lg font-medium cursor-pointer flex items-center gap-1 ${
-                  spcLayer === mode ? 'bg-amber-500/25 text-amber-200 font-semibold' : 'text-slate-400'
+                  spcLayer === mode
+                    ? mode === 'hail'
+                      ? 'bg-fuchsia-500/25 text-fuchsia-200 font-semibold'
+                      : 'bg-amber-500/25 text-amber-200 font-semibold'
+                    : 'text-slate-400'
                 }`}
               >
-                {mode === 'day1' && <ShieldAlert className="w-3 h-3 text-amber-400" />}
-                {mode === 'none' ? 'SPC Off' : mode === 'day1' ? 'SPC Day 1' : 'SPC Day 2'}
+                {(mode === 'day1' || mode === 'hail') && (
+                  <ShieldAlert
+                    className={`w-3 h-3 ${mode === 'hail' ? 'text-fuchsia-400' : 'text-amber-400'}`}
+                  />
+                )}
+                {mode === 'none'
+                  ? 'SPC Off'
+                  : mode === 'day1'
+                    ? 'SPC Day 1'
+                    : mode === 'day2'
+                      ? 'SPC Day 2'
+                      : 'SPC Hail'}
               </button>
             ))}
           </div>
@@ -385,8 +588,98 @@ export const RadarMesonetMap: React.FC<RadarMesonetMapProps> = ({
         </div>
       </div>
 
-      <div className="relative w-full h-[calc(100dvh-250px)] min-h-[360px] max-h-[500px] sm:h-[470px] sm:max-h-none bg-slate-950">
+      <div className="relative w-full h-[calc(100dvh-250px)] min-h-[360px] max-h-[520px] sm:h-[490px] sm:max-h-none bg-slate-950">
         <div ref={containerRef} className="w-full h-full" />
+
+        {/* Legend Pill */}
+        <div className="absolute top-3 left-3 z-10 max-w-[calc(100%-56px)] px-2.5 py-1 rounded-lg bg-slate-950/85 border border-slate-800 text-[10px] text-slate-300 flex items-center gap-1.5">
+          <Layers className="w-3 h-3 text-cyan-400 shrink-0" />
+          <span className="truncate">
+            Cyan: OK Mesonet · Indigo: ASOS/METAR
+            {hailCoreCount > 0
+              ? ` · Magenta: ${hailCoreCount} Hail Core(s) + 45m Track`
+              : ' · Tap map to pin rooftop'}
+          </span>
+        </div>
+
+        {/* Tap-on-Map Rooftop Pinning Card */}
+        {tappedCoords && (
+          <div className="absolute top-11 left-3 right-12 sm:left-auto sm:right-14 sm:w-80 z-20 p-3 rounded-2xl bg-slate-950/95 border border-emerald-400/45 backdrop-blur-md shadow-2xl space-y-2.5 text-xs">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <div className="font-bold text-emerald-300 flex items-center gap-1.5">
+                  <MapPin className="w-3.5 h-3.5 shrink-0" />
+                  <span className="truncate">
+                    {resolvingTap
+                      ? 'Resolving rooftop address...'
+                      : tappedGeo?.name || 'Dropped Rooftop Pin'}
+                  </span>
+                </div>
+                {tappedGeo?.display_address &&
+                  tappedGeo.display_address !== tappedGeo.name && (
+                    <div className="text-[11px] text-slate-300 line-clamp-2 mt-0.5">
+                      {tappedGeo.display_address}
+                    </div>
+                  )}
+                <div className="text-[10px] font-mono text-slate-400 mt-0.5">
+                  {tappedCoords.lat.toFixed(5)}°, {tappedCoords.lon.toFixed(5)}°
+                  {tappedGeo?.elevation_m !== undefined && (
+                    <>
+                      {' · Elev '}
+                      {units === 'imperial'
+                        ? `${Math.round(tappedGeo.elevation_m * 3.28084)} ft`
+                        : `${Math.round(tappedGeo.elevation_m)} m`}
+                    </>
+                  )}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={clearTappedPin}
+                className="p-1 rounded-lg bg-slate-900 text-slate-400 hover:text-white cursor-pointer shrink-0"
+                title="Cancel dropped pin"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            <input
+              type="text"
+              value={tappedNickname}
+              onChange={(e) => setTappedNickname(e.target.value)}
+              placeholder='Optional label (e.g., "Home", "Ranch")'
+              className="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-base sm:text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-400"
+            />
+
+            <div className="flex items-center gap-2">
+              {onSelectEphemeral && (
+                <button
+                  type="button"
+                  onClick={handleInstantTappedForecast}
+                  className="flex-1 py-1.5 px-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-medium flex items-center justify-center gap-1 cursor-pointer"
+                >
+                  <Eye className="w-3.5 h-3.5" />
+                  Instant View
+                </button>
+              )}
+              {onPinnedNew && (
+                <button
+                  type="button"
+                  onClick={handlePinTappedRooftop}
+                  disabled={pinningTap}
+                  className="flex-1 py-1.5 px-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold flex items-center justify-center gap-1 cursor-pointer"
+                >
+                  {pinningTap ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Cpu className="w-3.5 h-3.5" />
+                  )}
+                  Pin Rooftop
+                </button>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Radar Timeline Scrubber Bar */}
         {radarProduct === 'nexrad' && frames.length > 0 && (
@@ -415,11 +708,6 @@ export const RadarMesonetMap: React.FC<RadarMesonetMapProps> = ({
             </span>
           </div>
         )}
-
-        <div className="absolute top-3 left-3 z-10 max-w-[calc(100%-56px)] px-2.5 py-1 rounded-lg bg-slate-950/85 border border-slate-800 text-[10px] text-slate-300 flex items-center gap-1.5">
-          <Layers className="w-3 h-3 text-cyan-400 shrink-0" />
-          <span className="truncate">Cyan: OK Mesonet (5m) · Indigo: ASOS</span>
-        </div>
       </div>
     </section>
   );

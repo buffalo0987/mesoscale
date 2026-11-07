@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import math
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -172,14 +173,18 @@ class WebPushService:
         *,
         location: dict[str, Any],
         alerts: list[NwsAlert],
-        hourly_forecast: list[dict[str, Any]],
+        hourly_forecast: list[dict[str, Any]] | None = None,
+        hail_risk: dict[str, Any] | None = None,
         prev_day_p50_map: dict[str, float] | None = None,
         now_utc: datetime | None = None,
     ) -> list[dict[str, Any]]:
         """
-        Evaluate NWS Severe Warnings + Smart Forecast Shift / Bust / Freezing Rain triggers
-        with deduplication so each distinct event notifies once.
+        Evaluate Garage Hail Shield + NWS Severe Warnings + Smart Forecast Shift / Bust / Ice triggers
+        with deduplication and size-escalation awareness so each distinct threat notifies cleanly.
         """
+        if not location.get("alerts_enabled", True):
+            return []
+
         ref_now = now_utc or datetime.now(UTC)
         prefs = await self.app_store.get_notification_prefs()
         if not prefs.get("enabled", True):
@@ -218,6 +223,41 @@ class WebPushService:
                 sent_cache[dedup_key] = ref_now.isoformat()
             dispatched.append({"key": dedup_key, **res})
 
+        # 0. Garage Hail Shield Alert (NEXRAD approaching hail core OR NWS CAP/SPS hail tag)
+        if prefs.get("hail_alerts", True) and hail_risk:
+            h_status = str(hail_risk.get("status") or "none")
+            h_size = float(hail_risk.get("max_hail_in") or 0.0)
+            min_sz = float(prefs.get("hail_min_size_in", 0.50))
+            bypass_hail_quiet = bool(prefs.get("hail_bypass_quiet_hours", True))
+            if h_status in ("approaching", "imminent") and h_size >= min_sz:
+                cells = hail_risk.get("approaching_cells") or []
+                eta_min = hail_risk.get("eta_minutes")
+                size_bucket = int(math.floor(h_size * 2.0 + 1e-6))  # 0.50" steps trigger re-escalation!
+                if cells:
+                    top_c = cells[0]
+                    cell_tag = str(top_c.get("cell_key") or "CELL")
+                    eta_txt = f"~{eta_min} min ETA" if eta_min is not None else "Approaching"
+                    title = f"🧊 Hail Alert ({eta_txt}) — {loc_name}"
+                    body = (
+                        f"Move vehicles under cover: {hail_risk.get('hail_label', '')} hail core "
+                        f"{top_c.get('distance_mi', '?')} mi {top_c.get('bearing_from_target', '')} "
+                        f"tracking toward {loc_name} at {top_c.get('speed_mph', '?')} mph."
+                    )
+                else:
+                    cell_tag = str(hail_risk.get("nws_alert_event") or "NWS_HAIL").replace(" ", "_")
+                    title = f"🧊 Hail Threat Indicated — {loc_name}"
+                    body = (
+                        f"Move vehicles under cover: {hail_risk.get('headline') or 'Hail indicated at your location.'}"
+                    )
+                dedup_hail = f"hail:{loc_id}:{ref_now.strftime('%Y%m%d')}:{cell_tag}:b{size_bucket}"
+                await maybe_fire(
+                    dedup_hail,
+                    title,
+                    body,
+                    severity="critical" if (h_status == "imminent" or h_size >= 1.0) else "warning",
+                    bypass_quiet=bypass_hail_quiet or h_size >= 1.0,
+                )
+
         # 1. NWS Warnings & Watches (Tornado / Extreme ALWAYS bypass Quiet Hours!)
         for alert in alerts:
             is_watch = "watch" in alert.event.lower()
@@ -234,7 +274,8 @@ class WebPushService:
                 bypass_quiet=alert.is_life_threatening,
             )
 
-        next_36 = hourly_forecast[:36]
+        hrs_list = hourly_forecast or []
+        next_36 = hrs_list[:36]
 
         # 2. Freezing Rain / Ice Glaze Onset Alert
         if prefs.get("freezing_rain_risk", True):
@@ -263,8 +304,8 @@ class WebPushService:
 
         # 4. Smart Forecast Temperature Shift (>= threshold °F vs earlier run)
         shift_thresh_f = float(prefs.get("model_temp_shift_f", 8.0))
-        if prev_day_p50_map and shift_thresh_f > 0:
-            for r in hourly_forecast[6:36]:
+        if prev_day_p50_map and shift_thresh_f > 0 and len(hrs_list) > 6:
+            for r in hrs_list[6:36]:
                 vt = r["valid_time_utc"]
                 if vt in prev_day_p50_map:
                     delta_f = (float(r["temp_p50_c"]) - float(prev_day_p50_map[vt])) * 1.8

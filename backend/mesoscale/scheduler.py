@@ -25,6 +25,17 @@ class MesoscaleScheduler:
             return
         self.started_at_utc = datetime.now(UTC)
 
+        # Every 2 minutes: rapid Garage Hail Shield (NEXRAD storm cell ETA) + NWS Severe Warnings
+        self.scheduler.add_job(
+            self.job_rapid_alerts_loop,
+            "interval",
+            minutes=2,
+            id="rapid_hail_warnings",
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+        )
+
         # Every 5 minutes: live 5-min Oklahoma Mesonet / ASOS observations + 2-State Kalman update
         self.scheduler.add_job(
             self.job_fast_observation_loop,
@@ -95,6 +106,16 @@ class MesoscaleScheduler:
                 except Exception as exc:
                     logger.warning("Startup refresh failed for location %s: %s", lid, exc)
 
+    async def job_rapid_alerts_loop(self) -> None:
+        locations = await self.engine.app_store.list_locations()
+        for loc in locations:
+            if not loc.get("alerts_enabled", True):
+                continue
+            try:
+                await self.engine.check_rapid_alerts_for_location(int(loc["id"]))
+            except Exception as exc:
+                logger.warning("Rapid hail/alerts loop warning for %s: %s", loc["id"], exc)
+
     async def job_fast_observation_loop(self) -> None:
         locations = await self.engine.app_store.list_locations()
         for loc in locations:
@@ -112,7 +133,11 @@ class MesoscaleScheduler:
                 logger.warning("Hourly forecast loop warning for %s: %s", loc["id"], exc)
 
     async def job_nightly_retrain(self) -> None:
-        await self.engine.telemetry.compact_subhourly(retention_days=30)
+        await self.engine.telemetry.compact_telemetry(
+            subhourly_days=30,
+            retention_days=self.engine.settings.retention_days,
+            thin_runs_after_days=self.engine.settings.thin_hourly_runs_after_days,
+        )
         locations = await self.engine.app_store.list_locations()
         for loc in locations:
             try:

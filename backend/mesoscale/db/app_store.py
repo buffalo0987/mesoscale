@@ -13,6 +13,10 @@ DEFAULT_NOTIFICATION_PREFS: dict[str, Any] = {
     "enabled": True,
     "nws_warnings": True,
     "nws_watches": True,
+    "hail_alerts": True,
+    "hail_min_size_in": 0.50,
+    "hail_lead_minutes": 45,
+    "hail_bypass_quiet_hours": True,
     "model_temp_shift_f": 8.0,
     "frontal_bust_risk": True,
     "freezing_rain_risk": True,
@@ -52,6 +56,7 @@ class AppStore:
                 CREATE TABLE IF NOT EXISTS pinned_locations (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     name TEXT NOT NULL,
+                    address_label TEXT NOT NULL DEFAULT '',
                     admin1 TEXT NOT NULL DEFAULT '',
                     country TEXT NOT NULL DEFAULT 'US',
                     lat REAL NOT NULL,
@@ -59,6 +64,7 @@ class AppStore:
                     elevation_m REAL NOT NULL DEFAULT 350.0,
                     timezone TEXT NOT NULL DEFAULT 'America/Chicago',
                     stations_json TEXT NOT NULL DEFAULT '[]',
+                    alerts_enabled INTEGER NOT NULL DEFAULT 1,
                     backfill_status TEXT NOT NULL DEFAULT 'pending',
                     backfill_progress REAL NOT NULL DEFAULT 0.0,
                     backfill_message TEXT NOT NULL DEFAULT '',
@@ -112,6 +118,15 @@ class AppStore:
                 );
                 """
             )
+            # Idempotent schema migrations for existing SQLite databases
+            for alter_sql in (
+                "ALTER TABLE pinned_locations ADD COLUMN address_label TEXT NOT NULL DEFAULT ''",
+                "ALTER TABLE pinned_locations ADD COLUMN alerts_enabled INTEGER NOT NULL DEFAULT 1",
+            ):
+                try:
+                    await db.execute(alter_sql)
+                except Exception:
+                    pass
             await db.commit()
 
     async def _connect(self) -> aiosqlite.Connection:
@@ -155,28 +170,39 @@ class AppStore:
         elevation_m: float,
         timezone_name: str,
         stations: list[dict[str, Any]],
+        address_label: str = "",
+        alerts_enabled: bool = True,
     ) -> dict[str, Any]:
         conn = await self._connect()
         try:
-            # Avoid duplicate pin within ~1 km
+            # Avoid duplicate pin within ~85 meters (0.0008 deg) so multiple addresses in the same city stay separate
             async with conn.execute("SELECT * FROM pinned_locations") as cur:
                 existing = await cur.fetchall()
                 for row in existing:
                     r = dict(row)
-                    if abs(r["lat"] - lat) < 0.01 and abs(r["lon"] - lon) < 0.01:
+                    if abs(r["lat"] - lat) < 0.0008 and abs(r["lon"] - lon) < 0.0008:
+                        if address_label and not r.get("address_label"):
+                            await conn.execute(
+                                "UPDATE pinned_locations SET name = ?, address_label = ? WHERE id = ?",
+                                (name, address_label, r["id"]),
+                            )
+                            await conn.commit()
+                            r["name"] = name
+                            r["address_label"] = address_label
                         return self._decode_location(r)
 
             now = utc_now_iso()
             cur = await conn.execute(
                 """
                 INSERT INTO pinned_locations
-                    (name, admin1, country, lat, lon, elevation_m, timezone,
-                     stations_json, backfill_status, backfill_progress,
+                    (name, address_label, admin1, country, lat, lon, elevation_m, timezone,
+                     stations_json, alerts_enabled, backfill_status, backfill_progress,
                      backfill_message, model_status, created_at_utc)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0.0, 'Queued for Day-1 backfill', 'untrained', ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0.0, 'Queued for Day-1 backfill', 'untrained', ?)
                 """,
                 (
                     name,
+                    address_label,
                     admin1,
                     country,
                     lat,
@@ -184,6 +210,7 @@ class AppStore:
                     elevation_m,
                     timezone_name,
                     json.dumps(stations),
+                    1 if alerts_enabled else 0,
                     now,
                 ),
             )
@@ -199,6 +226,9 @@ class AppStore:
         self,
         location_id: int,
         *,
+        name: str | None = None,
+        address_label: str | None = None,
+        alerts_enabled: bool | None = None,
         backfill_status: str | None = None,
         backfill_progress: float | None = None,
         backfill_message: str | None = None,
@@ -207,6 +237,15 @@ class AppStore:
     ) -> None:
         fields: list[str] = []
         params: list[Any] = []
+        if name is not None:
+            fields.append("name = ?")
+            params.append(name)
+        if address_label is not None:
+            fields.append("address_label = ?")
+            params.append(address_label)
+        if alerts_enabled is not None:
+            fields.append("alerts_enabled = ?")
+            params.append(1 if alerts_enabled else 0)
         if backfill_status is not None:
             fields.append("backfill_status = ?")
             params.append(backfill_status)
@@ -249,6 +288,8 @@ class AppStore:
     @staticmethod
     def _decode_location(row: dict[str, Any]) -> dict[str, Any]:
         row["stations"] = json.loads(row.pop("stations_json", "[]"))
+        row["address_label"] = str(row.get("address_label") or "")
+        row["alerts_enabled"] = bool(row.get("alerts_enabled", 1))
         return row
 
     # ── Model Registry, Conformal ACI & Kalman State ──────────────────────
